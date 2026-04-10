@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- REQUIRED: Short one-line description shown in future index enhancements -->
+  <meta name="description" content="Describe what this experiment does in one sentence.">
+  <!-- OPTIONAL: ISO date this was created -->
+  <meta name="date" content="YYYY-MM-DD">
+  <!-- OPTIONAL: Comma-separated tags -->
+  <meta name="tags" content="tag1, tag2">
+  <title>Experiment Title</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+      padding: 1rem;
+    }
+
+    nav {
+      margin-bottom: 1rem;
+    }
+
+    nav a {
+      color: #58a6ff;
+      text-decoration: none;
+      font-size: 0.875rem;
+    }
+
+    nav a:hover { text-decoration: underline; }
+
+    /* --- Docs section --- */
+    details {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+      max-width: 800px;
+    }
+
+    summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: #8b949e;
+      font-size: 0.875rem;
+      user-select: none;
+      list-style: none;
+    }
+
+    summary::before {
+      content: '▶ ';
+      font-size: 0.7em;
+    }
+
+    details[open] summary::before { content: '▼ '; }
+
+    .docs {
+      margin-top: 1rem;
+      color: #8b949e;
+      font-size: 0.9rem;
+      line-height: 1.7;
+    }
+
+    .docs h2 {
+      color: #c9d1d9;
+      font-size: 0.875rem;
+      font-weight: 600;
+      margin: 1rem 0 0.25rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .docs h2:first-child { margin-top: 0; }
+
+    .docs p + p { margin-top: 0.5rem; }
+
+    .docs code {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 3px;
+      padding: 0.1em 0.35em;
+      font-family: monospace;
+      font-size: 0.85em;
+      color: #79c0ff;
+    }
+
+    /* --- Experiment area --- */
+    main {
+      max-width: 800px;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #f0f6fc;
+      margin-bottom: 1.25rem;
+    }
+  </style>
+</head>
+<body>
+  <nav><a href="../index.html">← Back to experiments</a></nav>
+
+  <!-- ============================================================
+       DOCUMENTATION SECTION
+       Explain what this experiment does, how to use it, and how
+       it works technically. This stays collapsed by default so it
+       doesn't clutter the UI but is always accessible.
+  ================================================================ -->
+  <details>
+    <summary>How this works</summary>
+    <div class="docs">
+      <h2>About</h2>
+      <p>What does this experiment do and why is it interesting?</p>
+
+      <h2>How to use</h2>
+      <p>Step-by-step instructions for interacting with the experiment.</p>
+
+      <h2>Technical details</h2>
+      <p>Key implementation notes — algorithms used, browser APIs leveraged, interesting edge cases, etc.</p>
+    </div>
+  </details>
+
+  <!-- ============================================================
+       EXPERIMENT
+       Put your UI and interactive content here.
+  ================================================================ -->
+  <main>
+    <h1>Experiment Title</h1>
+
+    <!-- Your experiment UI goes here -->
+    <p style="color:#8b949e">Replace this with your experiment content.</p>
+  </main>
+
+  <script>
+    // Vanilla JS only — no imports, no build step.
+    // Write your experiment logic here.
+  </script>
+</body>
+</html>

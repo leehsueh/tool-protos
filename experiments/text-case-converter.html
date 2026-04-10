@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Convert text between common casing formats: UPPER, lower, Title, Sentence, camelCase, PascalCase, snake_case, kebab-case.">
+  <meta name="date" content="2026-04-10">
+  <meta name="tags" content="text, utility, formatting">
+  <title>Text Case Converter</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+      padding: 1rem;
+    }
+
+    nav { margin-bottom: 1rem; }
+    nav a {
+      color: #58a6ff;
+      text-decoration: none;
+      font-size: 0.875rem;
+    }
+    nav a:hover { text-decoration: underline; }
+
+    details {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+      max-width: 760px;
+    }
+
+    summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: #8b949e;
+      font-size: 0.875rem;
+      user-select: none;
+      list-style: none;
+    }
+
+    summary::before { content: '▶ '; font-size: 0.7em; }
+    details[open] summary::before { content: '▼ '; }
+
+    .docs {
+      margin-top: 1rem;
+      color: #8b949e;
+      font-size: 0.9rem;
+      line-height: 1.7;
+    }
+
+    .docs h2 {
+      color: #c9d1d9;
+      font-size: 0.875rem;
+      font-weight: 600;
+      margin: 1rem 0 0.25rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .docs h2:first-child { margin-top: 0; }
+    .docs p + p { margin-top: 0.5rem; }
+
+    .docs code {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 3px;
+      padding: 0.1em 0.35em;
+      font-family: monospace;
+      font-size: 0.85em;
+      color: #79c0ff;
+    }
+
+    /* --- Experiment --- */
+    main { max-width: 760px; }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #f0f6fc;
+      margin-bottom: 1.25rem;
+    }
+
+    textarea {
+      width: 100%;
+      height: 120px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #e6edf3;
+      font-size: 0.95rem;
+      font-family: inherit;
+      padding: 0.75rem;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    textarea:focus { border-color: #58a6ff; }
+
+    .buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin: 1rem 0;
+    }
+
+    button {
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #c9d1d9;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-family: monospace;
+      padding: 0.4rem 0.85rem;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+
+    button:hover {
+      background: #30363d;
+      border-color: #58a6ff;
+      color: #f0f6fc;
+    }
+
+    button:active { background: #388bfd22; }
+
+    .result-label {
+      font-size: 0.8rem;
+      color: #8b949e;
+      margin-bottom: 0.35rem;
+    }
+
+    .result-box {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 0.75rem;
+      font-family: monospace;
+      font-size: 0.95rem;
+      color: #79c0ff;
+      min-height: 2.5rem;
+      word-break: break-all;
+      white-space: pre-wrap;
+      position: relative;
+    }
+
+    .copy-btn {
+      position: absolute;
+      top: 0.4rem;
+      right: 0.4rem;
+      font-family: system-ui, sans-serif;
+      font-size: 0.75rem;
+      padding: 0.2rem 0.5rem;
+      background: #21262d;
+      border: 1px solid #30363d;
+      color: #8b949e;
+    }
+
+    .copy-btn.copied {
+      color: #3fb950;
+      border-color: #3fb950;
+    }
+
+    .result-wrapper { position: relative; }
+  </style>
+</head>
+<body>
+  <nav><a href="../index.html">← Back to experiments</a></nav>
+
+  <details>
+    <summary>How this works</summary>
+    <div class="docs">
+      <h2>About</h2>
+      <p>Converts any text into common casing formats used in programming and writing. Useful when you need to quickly switch between naming conventions or format output text.</p>
+
+      <h2>How to use</h2>
+      <p>Type or paste text into the input box, then click any format button. The converted text appears below and can be copied with the copy button.</p>
+
+      <h2>Technical details</h2>
+      <p>Each conversion is a pure JS function operating on the raw input string. The core helper <code>words(str)</code> splits input into an array of lowercase words by splitting on whitespace, underscores, hyphens, and camelCase/PascalCase boundaries (via a regex). Every format function then joins words differently.</p>
+      <p>No libraries are used — just <code>String.prototype</code> methods and regular expressions. The copy button uses the <code>navigator.clipboard</code> API with a brief visual feedback state.</p>
+    </div>
+  </details>
+
+  <main>
+    <h1>Text Case Converter</h1>
+
+    <textarea id="input" placeholder="Type or paste text here…" spellcheck="false"></textarea>
+
+    <div class="buttons">
+      <button data-fn="upper">UPPER CASE</button>
+      <button data-fn="lower">lower case</button>
+      <button data-fn="title">Title Case</button>
+      <button data-fn="sentence">Sentence case</button>
+      <button data-fn="camel">camelCase</button>
+      <button data-fn="pascal">PascalCase</button>
+      <button data-fn="snake">snake_case</button>
+      <button data-fn="kebab">kebab-case</button>
+      <button data-fn="constant">CONSTANT_CASE</button>
+      <button data-fn="dot">dot.case</button>
+    </div>
+
+    <div class="result-label" id="result-label" hidden>Result</div>
+    <div class="result-wrapper" id="result-wrapper" hidden>
+      <div class="result-box" id="result"></div>
+      <button class="copy-btn" id="copy-btn">Copy</button>
+    </div>
+  </main>
+
+  <script>
+    // Split any input string into an array of lowercase words.
+    // Handles: spaces, underscores, hyphens, and camelCase/PascalCase boundaries.
+    function words(str) {
+      return str
+        .replace(/([a-z])([A-Z])/g, '$1 $2')   // camel/Pascal split
+        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+        .split(/[\s_\-\.]+/)
+        .map(w => w.toLowerCase())
+        .filter(Boolean);
+    }
+
+    const conversions = {
+      upper:    str => str.toUpperCase(),
+      lower:    str => str.toLowerCase(),
+      title:    str => words(str).map(w => w[0].toUpperCase() + w.slice(1)).join(' '),
+      sentence: str => {
+        const lower = str.toLowerCase();
+        return lower.charAt(0).toUpperCase() + lower.slice(1);
+      },
+      camel:    str => {
+        const ws = words(str);
+        return ws[0] + ws.slice(1).map(w => w[0].toUpperCase() + w.slice(1)).join('');
+      },
+      pascal:   str => words(str).map(w => w[0].toUpperCase() + w.slice(1)).join(''),
+      snake:    str => words(str).join('_'),
+      kebab:    str => words(str).join('-'),
+      constant: str => words(str).join('_').toUpperCase(),
+      dot:      str => words(str).join('.'),
+    };
+
+    const inputEl       = document.getElementById('input');
+    const resultEl      = document.getElementById('result');
+    const resultLabel   = document.getElementById('result-label');
+    const resultWrapper = document.getElementById('result-wrapper');
+    const copyBtn       = document.getElementById('copy-btn');
+
+    document.querySelector('.buttons').addEventListener('click', e => {
+      const btn = e.target.closest('button[data-fn]');
+      if (!btn) return;
+      const fn  = conversions[btn.dataset.fn];
+      const raw = inputEl.value;
+      if (!raw.trim()) return;
+
+      const output = fn(raw);
+      resultEl.textContent = output;
+      resultLabel.hidden   = false;
+      resultWrapper.hidden = false;
+      copyBtn.textContent  = 'Copy';
+      copyBtn.classList.remove('copied');
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      const text = resultEl.textContent;
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        copyBtn.textContent = 'Copied!';
+        copyBtn.classList.add('copied');
+        setTimeout(() => {
+          copyBtn.textContent = 'Copy';
+          copyBtn.classList.remove('copied');
+        }, 1500);
+      } catch {
+        copyBtn.textContent = 'Error';
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>tool-protos — Browser Experiments</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+
+    header {
+      max-width: 860px;
+      margin: 0 auto 2.5rem;
+    }
+
+    header h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #f0f6fc;
+      margin-bottom: 0.5rem;
+    }
+
+    header h1 span {
+      color: #58a6ff;
+    }
+
+    header p {
+      color: #8b949e;
+      line-height: 1.6;
+      max-width: 600px;
+    }
+
+    header p + p {
+      margin-top: 0.5rem;
+    }
+
+    .repo-link {
+      display: inline-block;
+      margin-top: 0.75rem;
+      color: #58a6ff;
+      text-decoration: none;
+      font-size: 0.875rem;
+    }
+
+    .repo-link:hover { text-decoration: underline; }
+
+    main {
+      max-width: 860px;
+      margin: 0 auto;
+    }
+
+    h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 1rem;
+    }
+
+    #experiments-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 1rem;
+    }
+
+    .experiment-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 1.25rem;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .experiment-card:hover {
+      border-color: #58a6ff;
+      background: #1c2330;
+    }
+
+    .experiment-card h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #58a6ff;
+      margin-bottom: 0.35rem;
+    }
+
+    .experiment-card .filename {
+      font-size: 0.75rem;
+      color: #484f58;
+      font-family: monospace;
+    }
+
+    #status {
+      color: #8b949e;
+      font-size: 0.9rem;
+      padding: 2rem 0;
+    }
+
+    .how-to {
+      margin-top: 3rem;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 1.5rem;
+    }
+
+    .how-to h2 {
+      margin-bottom: 0.75rem;
+    }
+
+    .how-to ol {
+      padding-left: 1.25rem;
+      color: #8b949e;
+      line-height: 1.8;
+      font-size: 0.9rem;
+    }
+
+    .how-to code {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      padding: 0.1em 0.4em;
+      font-family: monospace;
+      font-size: 0.85em;
+      color: #79c0ff;
+    }
+
+    .how-to li + li { margin-top: 0.25rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>tool-<span>protos</span></h1>
+    <p>A sandbox of small browser experiments — each one a single HTML file you can open and run directly.</p>
+    <p>Built for Claude Code and other AI agents to prototype ideas quickly with no build step, no frameworks, just vanilla HTML and JS.</p>
+    <a class="repo-link" href="https://github.com/leehsueh/tool-protos" target="_blank" rel="noopener">github.com/leehsueh/tool-protos →</a>
+  </header>
+
+  <main>
+    <h2>Experiments</h2>
+    <div id="status">Loading experiments...</div>
+    <div id="experiments-grid" hidden></div>
+
+    <div class="how-to">
+      <h2>How to add an experiment</h2>
+      <ol>
+        <li>Copy <code>experiments/_template.html</code> to <code>experiments/your-experiment-name.html</code></li>
+        <li>Fill in the <code>&lt;title&gt;</code> and <code>&lt;meta name="description"&gt;</code> tags</li>
+        <li>Write your experiment in the <code>&lt;main&gt;</code> block and document it in the <code>&lt;details&gt;</code> section</li>
+        <li>Commit and push to <code>main</code> — GitHub Actions deploys it automatically</li>
+        <li>It will appear in this index on next page load</li>
+      </ol>
+    </div>
+  </main>
+
+  <script>
+    const REPO = 'leehsueh/tool-protos';
+    const DIR  = 'experiments';
+
+    function prettifyName(filename) {
+      return filename
+        .replace(/\.html$/, '')
+        .replace(/[-_]/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    async function loadExperiments() {
+      const statusEl = document.getElementById('status');
+      const gridEl   = document.getElementById('experiments-grid');
+
+      try {
+        const res  = await fetch(`https://api.github.com/repos/${REPO}/contents/${DIR}`);
+        if (!res.ok) throw new Error(`GitHub API returned ${res.status}`);
+        const files = await res.json();
+
+        const experiments = files.filter(f =>
+          f.type === 'file' &&
+          f.name.endsWith('.html') &&
+          !f.name.startsWith('_')
+        );
+
+        if (experiments.length === 0) {
+          statusEl.textContent = 'No experiments yet. Add one using the template below.';
+          return;
+        }
+
+        statusEl.hidden = true;
+        gridEl.hidden   = false;
+
+        for (const file of experiments) {
+          const card     = document.createElement('a');
+          card.className = 'experiment-card';
+          card.href      = `${DIR}/${file.name}`;
+
+          const title    = document.createElement('h3');
+          title.textContent = prettifyName(file.name);
+
+          const fname    = document.createElement('div');
+          fname.className = 'filename';
+          fname.textContent = file.name;
+
+          card.append(title, fname);
+          gridEl.append(card);
+        }
+      } catch (err) {
+        statusEl.textContent = `Could not load experiments list (${err.message}). Navigate directly to experiments/ or check the repo.`;
+        console.error(err);
+      }
+    }
+
+    loadExperiments();
+  </script>
+</body>
+</html>
