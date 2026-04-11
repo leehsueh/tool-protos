@@ -169,8 +169,9 @@
       <p>Drop a <code>.3mf</code> file onto the drop zone or click to browse. Drag to orbit the model; scroll or pinch to zoom. Hit <em>Reset view</em> to return to the default angle.</p>
 
       <h2>Technical details</h2>
-      <p>A <code>.3mf</code> file is a ZIP archive. The ZIP Central Directory is located by scanning for the <code>PK\x05\x06</code> signature and entries are decompressed with the browser's <code>DecompressionStream</code> API (<code>deflate-raw</code> mode). The primary model lives at <code>3D/3dmodel.model</code> — an XML document parsed with <code>DOMParser</code> using <code>getElementsByTagNameNS('*', ...)</code> to handle namespace prefixes safely.</p>
-      <p>Vertex normals are computed by accumulating cross-product face normals per vertex and normalizing. The WebGL 1 renderer uses a single ambient + diffuse lighting pass with Euler-angle orbit controls. Large meshes (over 65 536 vertices) use the <code>OES_element_index_uint</code> extension for 32-bit indices.</p>
+      <p>A <code>.3mf</code> file is a ZIP archive (with ZIP64 support for large files). The Central Directory is located via the <code>PK\x05\x06</code> end record (falling back to the ZIP64 <code>PK\x06\x06</code> record), and entries are decompressed with the browser's <code>DecompressionStream</code> API (<code>deflate-raw</code> mode).</p>
+      <p>Many slicers (Bambu Studio, MakerWorld) use the 3MF Production Extension: the top-level <code>3dmodel.model</code> contains only component references while the actual geometry lives in <code>3D/Objects/*.model</code>. To handle this transparently, every <code>.model</code> file in the archive is parsed and their geometry combined. <code>DOMParser</code> + <code>getElementsByTagNameNS('*', ...)</code> handles namespace prefixes safely.</p>
+      <p>Vertex normals are computed by accumulating cross-product face normals per vertex and normalizing. The WebGL 1 renderer uses ambient + diffuse lighting with Euler-angle orbit controls. Large meshes (over 65 536 vertices) use the <code>OES_element_index_uint</code> extension for 32-bit indices.</p>
     </div>
   </details>
 
@@ -209,6 +210,30 @@
   <script>
     /* ===================== ZIP PARSER ===================== */
 
+    // Read a uint64 LE as a JS Number (safe for file sizes < 2^53 bytes)
+    function readU64(view, pos) {
+      return view.getUint32(pos + 4, true) * 0x100000000 + view.getUint32(pos, true);
+    }
+
+    // Scan a ZIP extra-field block for tag 0x0001 (ZIP64) and return the
+    // overriding values for whichever of (uncompressed, compressed, localOffset)
+    // were flagged as needing them (i.e. were 0xFFFFFFFF in the regular record).
+    function zip64Extra(view, start, len, needUncomp, needComp, needOffset) {
+      let pos = start, end = start + len;
+      while (pos + 4 <= end) {
+        const tag = view.getUint16(pos, true), sz = view.getUint16(pos + 2, true);
+        if (tag === 0x0001) {
+          let off = pos + 4;
+          const uncomp  = needUncomp  ? (off += 8,  readU64(view, off - 8)) : null;
+          const comp    = needComp    ? (off += 8,  readU64(view, off - 8)) : null;
+          const localOff= needOffset  ? (off += 8,  readU64(view, off - 8)) : null;
+          return { uncomp, comp, localOff };
+        }
+        pos += 4 + sz;
+      }
+      return { uncomp: null, comp: null, localOff: null };
+    }
+
     async function parseZip(buffer) {
       const bytes = new Uint8Array(buffer);
       const view  = new DataView(buffer);
@@ -221,8 +246,21 @@
       }
       if (eocd === -1) throw new Error('Not a valid ZIP / 3MF file.');
 
-      const cdCount  = view.getUint16(eocd + 10, true);
-      const cdOffset = view.getUint32(eocd + 16, true);
+      let cdCount  = view.getUint16(eocd + 10, true);
+      let cdOffset = view.getUint32(eocd + 16, true);
+
+      // ZIP64: if values are sentinel 0xFFFF / 0xFFFFFFFF, read ZIP64 EOCD
+      if (cdOffset === 0xFFFFFFFF || cdCount === 0xFFFF) {
+        // ZIP64 EOCD Locator sits 20 bytes before the regular EOCD
+        const loc = eocd - 20;
+        if (loc >= 0 && view.getUint32(loc, true) === 0x07064b50) {
+          const z64 = readU64(view, loc + 8);          // offset of ZIP64 EOCD
+          if (view.getUint32(z64, true) === 0x06064b50) {
+            cdCount  = readU64(view, z64 + 32);
+            cdOffset = readU64(view, z64 + 48);
+          }
+        }
+      }
 
       const files = {};
       let pos = cdOffset;
@@ -230,26 +268,31 @@
       for (let i = 0; i < cdCount; i++) {
         if (view.getUint32(pos, true) !== 0x02014b50) break; // central dir sig
 
-        const method      = view.getUint16(pos + 10, true);
-        const compSize    = view.getUint32(pos + 20, true);
-        const uncompSize  = view.getUint32(pos + 24, true);
-        const fnLen       = view.getUint16(pos + 28, true);
-        const extraLen    = view.getUint16(pos + 30, true);
-        const commentLen  = view.getUint16(pos + 32, true);
-        const localOffset = view.getUint32(pos + 42, true);
+        const method     = view.getUint16(pos + 10, true);
+        let   compSize   = view.getUint32(pos + 20, true);
+        let   uncompSize = view.getUint32(pos + 24, true);
+        const fnLen      = view.getUint16(pos + 28, true);
+        const extraLen   = view.getUint16(pos + 30, true);
+        const commentLen = view.getUint16(pos + 32, true);
+        let   localOff   = view.getUint32(pos + 42, true);
 
         const name = new TextDecoder().decode(bytes.slice(pos + 46, pos + 46 + fnLen));
 
-        // Local file header: skip to data
-        const lhFnLen    = view.getUint16(localOffset + 26, true);
-        const lhExtraLen = view.getUint16(localOffset + 28, true);
-        const dataStart  = localOffset + 30 + lhFnLen + lhExtraLen;
+        // Resolve ZIP64 extended info for any sentinel values
+        if (compSize === 0xFFFFFFFF || uncompSize === 0xFFFFFFFF || localOff === 0xFFFFFFFF) {
+          const z = zip64Extra(view, pos + 46 + fnLen, extraLen,
+            uncompSize === 0xFFFFFFFF, compSize === 0xFFFFFFFF, localOff === 0xFFFFFFFF);
+          if (z.uncomp   !== null) uncompSize = z.uncomp;
+          if (z.comp     !== null) compSize   = z.comp;
+          if (z.localOff !== null) localOff   = z.localOff;
+        }
 
-        files[name] = {
-          method,
-          data: bytes.slice(dataStart, dataStart + compSize),
-          uncompSize,
-        };
+        // Local file header: skip to data
+        const lhFnLen    = view.getUint16(localOff + 26, true);
+        const lhExtraLen = view.getUint16(localOff + 28, true);
+        const dataStart  = localOff + 30 + lhFnLen + lhExtraLen;
+
+        files[name] = { method, data: bytes.slice(dataStart, dataStart + compSize), uncompSize };
 
         pos += 46 + fnLen + extraLen + commentLen;
       }
@@ -285,11 +328,14 @@
 
     /* ===================== 3MF PARSER ===================== */
 
-    function parse3MF(xmlText) {
-      const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
-
-      const err = doc.querySelector('parsererror');
-      if (err) throw new Error('XML parse error: ' + err.textContent.slice(0, 160));
+    // Parse one .model XML string. Returns { unit, metadata, vertices, triangles }
+    // or null if the XML is invalid / contains no geometry.
+    // Does NOT throw — callers combine results across multiple files.
+    function parse3MFDoc(xmlText) {
+      let doc;
+      try { doc = new DOMParser().parseFromString(xmlText, 'application/xml'); }
+      catch { return null; }
+      if (doc.querySelector('parsererror')) return null;
 
       const modelEl = doc.documentElement;
       const unit    = modelEl.getAttribute('unit') || 'millimeter';
@@ -298,47 +344,29 @@
       const metadata = {};
       for (const child of modelEl.children) {
         if (child.localName !== 'metadata') continue;
-        const name = child.getAttribute('name') || '';
-        const val  = child.textContent.trim();
-        if (name && val) metadata[name] = val;
+        const n = child.getAttribute('name'), v = child.textContent.trim();
+        if (n && v) metadata[n] = v;
       }
 
-      // Collect all meshes (handles multiple objects and namespace prefixes)
-      const allVerts = [];
-      const allTris  = [];
-
-      const meshEls = modelEl.getElementsByTagNameNS('*', 'mesh');
-      for (const mesh of meshEls) {
-        const vOffset  = allVerts.length / 3;
-        const vertEls  = mesh.getElementsByTagNameNS('*', 'vertex');
-        const triEls   = mesh.getElementsByTagNameNS('*', 'triangle');
-
-        for (const v of vertEls) {
-          allVerts.push(
-            parseFloat(v.getAttribute('x')) || 0,
-            parseFloat(v.getAttribute('y')) || 0,
-            parseFloat(v.getAttribute('z')) || 0
-          );
-        }
-
-        for (const t of triEls) {
-          allTris.push(
-            (parseInt(t.getAttribute('v1')) || 0) + vOffset,
-            (parseInt(t.getAttribute('v2')) || 0) + vOffset,
-            (parseInt(t.getAttribute('v3')) || 0) + vOffset
-          );
-        }
+      // Collect geometry from every <mesh> in this document.
+      // Each <mesh> has its own local vertex numbering; we apply a running
+      // offset so all triangles index into a single flat vertex array.
+      const verts = [], tris = [];
+      for (const mesh of modelEl.getElementsByTagNameNS('*', 'mesh')) {
+        const vOff = verts.length / 3;
+        for (const v of mesh.getElementsByTagNameNS('*', 'vertex'))
+          verts.push(parseFloat(v.getAttribute('x')) || 0,
+                     parseFloat(v.getAttribute('y')) || 0,
+                     parseFloat(v.getAttribute('z')) || 0);
+        for (const t of mesh.getElementsByTagNameNS('*', 'triangle'))
+          tris.push((parseInt(t.getAttribute('v1')) || 0) + vOff,
+                    (parseInt(t.getAttribute('v2')) || 0) + vOff,
+                    (parseInt(t.getAttribute('v3')) || 0) + vOff);
       }
 
-      if (allVerts.length === 0) throw new Error('No vertex data found in this 3MF file.');
+      if (!verts.length) return null; // assembly-only file — no geometry here
 
-      return {
-        metadata,
-        unit,
-        vertices:  new Float32Array(allVerts),
-        triangles: new Uint32Array(allTris),
-        stats: { vertices: allVerts.length / 3, triangles: allTris.length / 3 },
-      };
+      return { unit, metadata, vertices: new Float32Array(verts), triangles: new Uint32Array(tris) };
     }
 
     /* ===================== GEOMETRY ===================== */
@@ -700,30 +728,56 @@
         const buffer   = await file.arrayBuffer();
         const zipFiles = await parseZip(buffer);
 
-        // Locate the 3D model entry (case-insensitive)
-        const modelKey = Object.keys(zipFiles).find(k =>
-          k.toLowerCase() === '3d/3dmodel.model' ||
-          k.toLowerCase().endsWith('.model')
-        );
-        if (!modelKey) throw new Error('No 3D model found inside the 3MF archive.');
+        // Many 3MF files (Bambu/MakerWorld, Prusa, etc.) use the 3MF Production
+        // Extension: the top-level 3dmodel.model contains only component
+        // references while the actual geometry lives in 3D/Objects/*.model.
+        // Strategy: parse EVERY .model file in the archive and combine geometry.
+        const modelKeys = Object.keys(zipFiles)
+          .filter(k => k.toLowerCase().endsWith('.model'))
+          .sort();
 
-        const modelBytes = await inflate(zipFiles[modelKey]);
-        const xmlText    = new TextDecoder().decode(modelBytes);
-        const { metadata, unit, vertices, triangles, stats } = parse3MF(xmlText);
+        if (!modelKeys.length) {
+          const listing = Object.keys(zipFiles).slice(0, 12).join(', ');
+          throw new Error(`No .model files found in archive. Contents: ${listing}`);
+        }
+
+        let unit = 'millimeter', metadata = {};
+        const allV = [], allT = [];
+        let totalVerts = 0;
+
+        for (const key of modelKeys) {
+          let bytes;
+          try { bytes = await inflate(zipFiles[key]); } catch { continue; }
+          const result = parse3MFDoc(new TextDecoder().decode(bytes));
+          if (!result) continue;                            // skip assembly-only files
+
+          // Take metadata from the first file that has any
+          if (!Object.keys(metadata).length) {
+            metadata = result.metadata;
+            unit     = result.unit;
+          }
+
+          // Append vertices; offset triangle indices by the running vertex count
+          for (const v of result.vertices) allV.push(v);
+          for (const t of result.triangles) allT.push(t + totalVerts);
+          totalVerts += result.vertices.length / 3;
+        }
+
+        if (!allV.length)
+          throw new Error('No 3D geometry found in any model file inside the archive.');
+
+        const vertices  = new Float32Array(allV);
+        const triangles = new Uint32Array(allT);
+        const stats     = { vertices: totalVerts, triangles: allT.length / 3 };
+
         const { verts, normals, indices, dims } = processGeometry(vertices, triangles);
 
-        // Init WebGL on first load
-        if (!gl) {
-          viewerArea.hidden = false; // canvas must be in layout for clientWidth
-          initWebGL(canvas);
-        }
+        // Init WebGL on first load (canvas must be visible to measure clientWidth)
+        if (!gl) { viewerArea.hidden = false; initWebGL(canvas); }
 
         uploadMesh(verts, normals, indices);
 
-        // Reset camera
         theta = 0.4; phi = 0.2; camDist = 4.0;
-
-        // Start render loop
         if (rafId) cancelAnimationFrame(rafId);
         viewerArea.hidden = false;
         dropZone.hidden   = true;
