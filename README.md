@@ -42,13 +42,7 @@ tool-protos/
 
 4. **Build the experiment** in `<main>` using vanilla HTML + JS only. No `import`, no CDN scripts — everything inline.
 
-5. **Register the experiment in `index.html`** — add an entry to the `EXPERIMENTS` array near the bottom of `index.html`:
-   ```js
-   { name: 'your-experiment-name.html', desc: 'One sentence description.' },
-   ```
-   Keep entries in alphabetical order. **This is the step that makes the experiment appear on the index.** The index does not auto-discover files; it renders from this static list.
-
-6. **Commit and push to `main`**. GitHub Actions deploys automatically.
+5. **Commit and push to `main`**. GitHub Actions deploys automatically. The index page auto-discovers all `.html` files in `experiments/` (except those starting with `_`) via the GitHub API, so no manual registration is needed — the experiment will appear on the next page load.
 
 ## Rules / conventions
 

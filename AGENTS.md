@@ -5,29 +5,22 @@ This file captures conventions and non-obvious requirements for AI agents
 
 ---
 
-## Adding a new experiment — required checklist
+## Adding a new experiment — checklist
 
-When creating a new experiment, **both** of these files must be updated:
+1. Create `experiments/<kebab-case-name>.html` (copy from `experiments/_template.html`)
+2. Fill in `<title>` and `<meta name="description">` in `<head>`
+3. Write the `<details>` documentation block (About, How to use, Technical details)
+4. Build the experiment in `<main>` — vanilla HTML/CSS/JS only, no imports, no CDN
+5. Commit and push to `main`
 
-| File | What to do |
-|------|------------|
-| `experiments/<name>.html` | Create the experiment (copy from `_template.html`) |
-| `index.html` | Add an entry to the `EXPERIMENTS` array |
+**No manual registration in `index.html` is needed.** The index auto-discovers
+all `.html` files in `experiments/` (excluding `_`-prefixed ones) via the
+GitHub Contents API and renders them as cards automatically on the next page
+load.
 
-### Why the index.html step is mandatory
-
-`index.html` renders its experiment cards from a **hardcoded `EXPERIMENTS`
-array** — it does **not** auto-discover files in the `experiments/` directory.
-A new `.html` file that is not registered in that array will not appear on the
-index page, locally or in production.
-
-```js
-// In index.html — add your entry here, in alphabetical order:
-const EXPERIMENTS = [
-  { name: 'my-new-experiment.html', desc: 'One sentence description.' },
-  // ...
-];
-```
+> Note: auto-discovery only reflects the **default branch** (`main`). Experiments
+> on feature branches are reachable by direct URL but won't appear on the index
+> until the branch is merged.
 
 ---
 
@@ -40,14 +33,14 @@ const EXPERIMENTS = [
   <meta name="description" content="One sentence about what this does.">
   <title>Human Readable Title</title>
   ```
-- **`<details>` documentation block** is required — include About, How to use, and Technical details sections (see `_template.html`)
-- **Files starting with `_`** are excluded from the index by convention (use for templates or drafts)
+- **`<details>` documentation block** is required — include About, How to use,
+  and Technical details sections (see `_template.html`)
+- **Files starting with `_`** are excluded from the index (use for templates/drafts)
 - **No build tools** — vanilla HTML/CSS/JS only; no CDN scripts, no `import`
 
 ---
 
 ## Deployment
 
-- GitHub Actions (`.github/workflows/deploy.yml`) deploys the repo root to GitHub Pages on every push to `main`
-- Experiments on feature branches are accessible by their direct path but do not appear on the deployed index until merged to `main`
-- To preview locally, open `index.html` directly in a browser — the static `EXPERIMENTS` array means no server or network access is needed
+GitHub Actions (`.github/workflows/deploy.yml`) deploys the repo root to
+GitHub Pages on every push to `main`. No configuration needed.
