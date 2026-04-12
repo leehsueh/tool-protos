@@ -157,15 +157,22 @@
         <li>Copy <code>experiments/_template.html</code> to <code>experiments/your-experiment-name.html</code></li>
         <li>Fill in the <code>&lt;title&gt;</code> and <code>&lt;meta name="description"&gt;</code> tags</li>
         <li>Write your experiment in the <code>&lt;main&gt;</code> block and document it in the <code>&lt;details&gt;</code> section</li>
+        <li><strong>Add an entry to the <code>EXPERIMENTS</code> array in <code>index.html</code></strong> — this is what makes it appear in the index</li>
         <li>Commit and push to <code>main</code> — GitHub Actions deploys it automatically</li>
-        <li>It will appear in this index on next page load</li>
       </ol>
     </div>
   </main>
 
   <script>
-    const REPO = 'leehsueh/tool-protos';
-    const DIR  = 'experiments';
+    // ----------------------------------------------------------------
+    // EXPERIMENTS LIST — update this array whenever you add a new file
+    // to the experiments/ directory. Keep entries in alphabetical order.
+    // Files prefixed with _ (templates/drafts) should NOT be listed here.
+    // ----------------------------------------------------------------
+    const EXPERIMENTS = [
+      { name: '3mf-viewer.html',          desc: 'Upload a .3mf file to view its 3D model interactively and inspect embedded metadata.' },
+      { name: 'text-case-converter.html', desc: 'Convert text between common casing formats: UPPER, lower, Title, camelCase, snake_case, and more.' },
+    ];
 
     function prettifyName(filename) {
       return filename
@@ -174,51 +181,44 @@
         .replace(/\b\w/g, c => c.toUpperCase());
     }
 
-    async function loadExperiments() {
+    function renderExperiments() {
       const statusEl = document.getElementById('status');
       const gridEl   = document.getElementById('experiments-grid');
 
-      try {
-        const res  = await fetch(`https://api.github.com/repos/${REPO}/contents/${DIR}`);
-        if (!res.ok) throw new Error(`GitHub API returned ${res.status}`);
-        const files = await res.json();
+      if (EXPERIMENTS.length === 0) {
+        statusEl.textContent = 'No experiments yet. Add one using the template below.';
+        return;
+      }
 
-        const experiments = files.filter(f =>
-          f.type === 'file' &&
-          f.name.endsWith('.html') &&
-          !f.name.startsWith('_')
-        );
+      statusEl.hidden = true;
+      gridEl.hidden   = false;
 
-        if (experiments.length === 0) {
-          statusEl.textContent = 'No experiments yet. Add one using the template below.';
-          return;
-        }
+      for (const exp of EXPERIMENTS) {
+        const card     = document.createElement('a');
+        card.className = 'experiment-card';
+        card.href      = `experiments/${exp.name}`;
 
-        statusEl.hidden = true;
-        gridEl.hidden   = false;
+        const title = document.createElement('h3');
+        title.textContent = prettifyName(exp.name);
 
-        for (const file of experiments) {
-          const card     = document.createElement('a');
-          card.className = 'experiment-card';
-          card.href      = `${DIR}/${file.name}`;
+        const fname = document.createElement('div');
+        fname.className   = 'filename';
+        fname.textContent = exp.name;
 
-          const title    = document.createElement('h3');
-          title.textContent = prettifyName(file.name);
-
-          const fname    = document.createElement('div');
-          fname.className = 'filename';
-          fname.textContent = file.name;
-
+        if (exp.desc) {
+          const desc = document.createElement('p');
+          desc.style.cssText = 'margin-top:.5rem;font-size:.8rem;color:#8b949e;line-height:1.5';
+          desc.textContent = exp.desc;
+          card.append(title, fname, desc);
+        } else {
           card.append(title, fname);
-          gridEl.append(card);
         }
-      } catch (err) {
-        statusEl.textContent = `Could not load experiments list (${err.message}). Navigate directly to experiments/ or check the repo.`;
-        console.error(err);
+
+        gridEl.append(card);
       }
     }
 
-    loadExperiments();
+    renderExperiments();
   </script>
 </body>
 </html>
