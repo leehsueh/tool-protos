@@ -62,11 +62,38 @@
       const sig = view.getUint32(p, true);
       if (sig !== 0x04034b50) break;
       const method  = view.getUint16(p + 8, true);
-      const compSize = view.getUint32(p + 18, true);
+      const flags    = view.getUint16(p + 6, true);
+      let   compSize = view.getUint32(p + 18, true);
       const nameLen  = view.getUint16(p + 26, true);
       const extraLen = view.getUint16(p + 28, true);
       const name = td.decode(bytes.subarray(p + 30, p + 30 + nameLen));
       const dataOffset = p + 30 + nameLen + extraLen;
+
+      if ((flags & 0x08) && compSize === 0) {
+        // Streaming entry (GP bit 3 set): true compressed size is in a trailing
+        // data descriptor (signature 0x08074b50). Scan forward to find it.
+        let scan = dataOffset;
+        let found = false;
+        while (scan < view.byteLength - 4) {
+          if (view.getUint32(scan, true) === 0x08074b50) {
+            compSize = view.getUint32(scan + 8, true); // sig, crc32, compSize, uncompSize
+            files[name] = {
+              data: bytes.subarray(dataOffset, dataOffset + compSize),
+              compressed: method === 8,
+            };
+            p = scan + 16; // advance past 16-byte descriptor (incl. signature)
+            found = true;
+            break;
+          }
+          scan++;
+        }
+        if (!found) {
+          console.warn(`parseZipLinear: no data descriptor found for streaming entry ${name}; aborting scan.`);
+          break;
+        }
+        continue;
+      }
+
       files[name] = {
         data: bytes.subarray(dataOffset, dataOffset + compSize),
         compressed: method === 8,
@@ -127,10 +154,14 @@
   function extractMesh(meshEl) {
     const verts = [], tris = [];
     for (const v of meshEl.getElementsByTagNameNS('*', 'vertex')) {
-      verts.push(+v.getAttribute('x') || 0, +v.getAttribute('y') || 0, +v.getAttribute('z') || 0);
+      const x = v.getAttribute('x'), y = v.getAttribute('y'), z = v.getAttribute('z');
+      if (x === null || y === null || z === null) continue; // skip malformed vertex
+      verts.push(parseFloat(x), parseFloat(y), parseFloat(z));
     }
     for (const t of meshEl.getElementsByTagNameNS('*', 'triangle')) {
-      tris.push(+t.getAttribute('v1') || 0, +t.getAttribute('v2') || 0, +t.getAttribute('v3') || 0);
+      const a = t.getAttribute('v1'), b = t.getAttribute('v2'), c = t.getAttribute('v3');
+      if (a === null || b === null || c === null) continue; // skip malformed triangle
+      tris.push(parseInt(a, 10), parseInt(b, 10), parseInt(c, 10));
     }
     if (!verts.length || !tris.length) return null;
     return { vertices: new Float32Array(verts), triangles: new Uint32Array(tris) };
@@ -216,7 +247,13 @@
   /* ===================== COMPONENT RESOLUTION ===================== */
   // Walk one object's graph; emit { meshObjectId, vertices, triangles } leaves
   // with the cumulative transform applied to vertex positions.
-  function resolveObjectToParts(objectId, sourcePath, cumulativeXform, modelIndex, out) {
+  function resolveObjectToParts(objectId, sourcePath, cumulativeXform, modelIndex, out, visited = new Set()) {
+    const key = sourcePath + '#' + objectId;
+    if (visited.has(key)) {
+      console.warn(`3MF component cycle detected at ${key}; skipping.`);
+      return;
+    }
+    visited.add(key);
     const file = modelIndex.get(sourcePath);
     if (!file) return; // missing component file — silently skip
     const obj = file.objects.get(objectId);
@@ -242,16 +279,14 @@
     // Recurse into components, composing transforms.
     for (const c of obj.components) {
       const composed = mat4Mul(cumulativeXform, c.transform);
-      resolveObjectToParts(c.targetId, c.targetPath, composed, modelIndex, out);
+      resolveObjectToParts(c.targetId, c.targetPath, composed, modelIndex, out, visited);
     }
   }
 
   /* ===================== MODEL_SETTINGS.CONFIG ===================== */
   function parseModelSettings(xmlText) {
     if (!xmlText) return { objects: new Map(), plates: [] };
-    let doc;
-    try { doc = new DOMParser().parseFromString(xmlText, 'application/xml'); }
-    catch { return { objects: new Map(), plates: [] }; }
+    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
     if (doc.querySelector('parsererror')) return { objects: new Map(), plates: [] };
 
     const getMeta = (el, key) => {
@@ -318,7 +353,8 @@
     const modelIndex = new Map();
     await Promise.all(modelKeys.map(async (k) => {
       let bytes;
-      try { bytes = await inflate(zipFiles[k]); } catch { return; }
+      try { bytes = await inflate(zipFiles[k]); }
+      catch (e) { console.warn(`Failed to decompress ${k}:`, e.message); return; }
       try {
         const parsed = parseModelXML(td.decode(bytes), k);
         modelIndex.set(k, parsed);
@@ -353,6 +389,9 @@
       const settingParts = settingObj ? [...settingObj.parts.values()] : [];
 
       const parts = leaves.map((leaf, idx) => {
+        // NOTE: positional match — assumes Bambu's <part> order in model_settings.config
+        // mirrors leaf emission order from resolveObjectToParts. Changing leaf order
+        // (e.g., emit order in resolveObjectToParts) will silently misalign names/extruders.
         const sp = settingParts[idx] || null;
         const name = (sp && sp.name) || leaf.meshObjectName || `Part ${leaf.meshObjectId}`;
         const extruder = sp ? sp.extruder : null;
@@ -387,7 +426,7 @@
         name: 'Unassigned',
         instances: orphans,
       });
-      if (!plates.length) plates = [{ id: 1, name: 'Plate 1', instances }];
+      // If instances.length === 0, plates is intentionally [] — nothing to render.
     } else {
       plates = [{ id: 1, name: 'Plate 1', instances }];
     }
