@@ -629,6 +629,8 @@
 
     async function loadFile(file) {
       setError('');
+      scene = null;
+      activePlateId = null;
       dropLabel.textContent = 'Parsing…';
       dropZone.style.pointerEvents = 'none';
       try {
@@ -658,6 +660,7 @@
     }
 
     function showPlate(plateId) {
+      if (!scene) return;
       const plate = scene.plates.find(p => p.id === plateId);
       if (!plate) return;
       activePlateId = plateId;
