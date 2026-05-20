@@ -336,6 +336,32 @@
       #canvas { height: 340px; }
       #info-panel { flex: none; width: 100%; max-height: 280px; }
     }
+
+    .plate-tabs {
+      display: flex;
+      gap: 0.25rem;
+      padding: 0.25rem 0;
+      margin-bottom: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .plate-tab {
+      background: #161b22;
+      border: 1px solid #30363d;
+      color: #e6edf3;
+      padding: 0.35rem 0.75rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-family: inherit;
+    }
+    .plate-tab.active { border-color: #58a6ff; background: #1f2933; }
+    .plate-tab:hover  { background: #1f2933; }
+    .part-group { margin-bottom: 0.5rem; }
+    .part-group summary { cursor: pointer; padding: 0.25rem 0; font-weight: 500; }
+    .part-group .part-list { list-style: none; padding-left: 1rem; font-size: 0.85rem; }
+    .part-group .part-list li { display: flex; justify-content: space-between; padding: 0.15rem 0; gap: 0.5rem; }
+    .color-dot { display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 50%; margin-right: 0.35rem; vertical-align: middle; border: 1px solid #30363d; }
+    .muted { opacity: 0.6; }
   </style>
 </head>
 <body>
@@ -381,6 +407,7 @@
       </div>
       <div class="viewer-layout">
         <div style="flex:1 1 auto;min-width:0">
+          <div id="plateTabs" class="plate-tabs"></div>
           <canvas id="canvas"></canvas>
           <div class="canvas-hint">Drag to orbit &nbsp;·&nbsp; Scroll to zoom</div>
         </div>
@@ -403,6 +430,7 @@
     </div>
   </main>
 
+  <script src="./lib/3mf-parser.js"></script>
   <script>
     /* ===================== BAMBU LAB PLA BASIC CATALOG ===================== */
     // Approximate hex values for the commonly-stocked Bambu Lab PLA Basic palette.
@@ -438,182 +466,6 @@
     const MAX_COLORS = 4;
     const MAX_THUMBS = 32;
     const NEUTRAL_GRAY = [0.55, 0.6, 0.65];
-
-    /* ===================== ZIP PARSER (from 3mf-viewer.html) ===================== */
-    function readU64(view, pos) {
-      return view.getUint32(pos + 4, true) * 0x100000000 + view.getUint32(pos, true);
-    }
-
-    function zip64Extra(view, start, len, needUncomp, needComp, needOffset) {
-      let pos = start, end = start + len;
-      while (pos + 4 <= end) {
-        const tag = view.getUint16(pos, true), sz = view.getUint16(pos + 2, true);
-        if (tag === 0x0001) {
-          let off = pos + 4;
-          const uncomp  = needUncomp  ? (off += 8, readU64(view, off - 8)) : null;
-          const comp    = needComp    ? (off += 8, readU64(view, off - 8)) : null;
-          const localOff= needOffset  ? (off += 8, readU64(view, off - 8)) : null;
-          return { uncomp, comp, localOff };
-        }
-        pos += 4 + sz;
-      }
-      return { uncomp: null, comp: null, localOff: null };
-    }
-
-    async function parseZip(buffer) {
-      const bytes = new Uint8Array(buffer);
-      const view  = new DataView(buffer);
-
-      let eocd = -1;
-      const start = Math.max(0, bytes.length - 65558);
-      for (let i = bytes.length - 22; i >= start; i--) {
-        if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
-      }
-      if (eocd === -1) throw new Error('Not a valid ZIP / 3MF file.');
-
-      let cdCount  = view.getUint16(eocd + 10, true);
-      let cdOffset = view.getUint32(eocd + 16, true);
-
-      if (cdOffset === 0xFFFFFFFF || cdCount === 0xFFFF) {
-        const loc = eocd - 20;
-        if (loc >= 0 && view.getUint32(loc, true) === 0x07064b50) {
-          const z64 = readU64(view, loc + 8);
-          if (view.getUint32(z64, true) === 0x06064b50) {
-            cdCount  = readU64(view, z64 + 32);
-            cdOffset = readU64(view, z64 + 48);
-          }
-        }
-      }
-
-      const files = {};
-      let pos = cdOffset;
-      for (let i = 0; i < cdCount; i++) {
-        if (view.getUint32(pos, true) !== 0x02014b50) break;
-        const method     = view.getUint16(pos + 10, true);
-        let   compSize   = view.getUint32(pos + 20, true);
-        let   uncompSize = view.getUint32(pos + 24, true);
-        const fnLen      = view.getUint16(pos + 28, true);
-        const extraLen   = view.getUint16(pos + 30, true);
-        const commentLen = view.getUint16(pos + 32, true);
-        let   localOff   = view.getUint32(pos + 42, true);
-
-        const name = new TextDecoder().decode(bytes.slice(pos + 46, pos + 46 + fnLen));
-
-        if (compSize === 0xFFFFFFFF || uncompSize === 0xFFFFFFFF || localOff === 0xFFFFFFFF) {
-          const z = zip64Extra(view, pos + 46 + fnLen, extraLen,
-            uncompSize === 0xFFFFFFFF, compSize === 0xFFFFFFFF, localOff === 0xFFFFFFFF);
-          if (z.uncomp   !== null) uncompSize = z.uncomp;
-          if (z.comp     !== null) compSize   = z.comp;
-          if (z.localOff !== null) localOff   = z.localOff;
-        }
-
-        const lhFnLen    = view.getUint16(localOff + 26, true);
-        const lhExtraLen = view.getUint16(localOff + 28, true);
-        const dataStart  = localOff + 30 + lhFnLen + lhExtraLen;
-
-        files[name] = { method, data: bytes.slice(dataStart, dataStart + compSize), uncompSize };
-        pos += 46 + fnLen + extraLen + commentLen;
-      }
-      return files;
-    }
-
-    async function inflate(entry) {
-      if (entry.method === 0) return entry.data;
-      if (entry.method !== 8) throw new Error('Unsupported ZIP compression method: ' + entry.method);
-      const ds = new DecompressionStream('deflate-raw');
-      const writer = ds.writable.getWriter();
-      const reader = ds.readable.getReader();
-      writer.write(entry.data); writer.close();
-      const chunks = []; let total = 0;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value); total += value.length;
-      }
-      const out = new Uint8Array(total);
-      let off = 0;
-      for (const c of chunks) { out.set(c, off); off += c.length; }
-      return out;
-    }
-
-    /* ===================== 3MF PARSER — PART-AWARE ===================== */
-    // Extract verts/tris from a single <mesh> element. Returns null if empty.
-    function extractMesh(meshEl) {
-      const verts = [], tris = [];
-      for (const v of meshEl.getElementsByTagNameNS('*', 'vertex')) {
-        verts.push(parseFloat(v.getAttribute('x')) || 0,
-                   parseFloat(v.getAttribute('y')) || 0,
-                   parseFloat(v.getAttribute('z')) || 0);
-      }
-      for (const t of meshEl.getElementsByTagNameNS('*', 'triangle')) {
-        tris.push(parseInt(t.getAttribute('v1')) || 0,
-                  parseInt(t.getAttribute('v2')) || 0,
-                  parseInt(t.getAttribute('v3')) || 0);
-      }
-      if (!verts.length || !tris.length) return null;
-      return { vertices: new Float32Array(verts), triangles: new Uint32Array(tris) };
-    }
-
-    // Parse one .model XML string and return { unit, metadata, parts: [{name, vertices, triangles}] }
-    function parse3MFDoc(xmlText) {
-      let doc;
-      try { doc = new DOMParser().parseFromString(xmlText, 'application/xml'); }
-      catch { return null; }
-      if (doc.querySelector('parsererror')) return null;
-
-      const modelEl = doc.documentElement;
-      const unit = modelEl.getAttribute('unit') || 'millimeter';
-
-      const metadata = {};
-      for (const child of modelEl.children) {
-        if (child.localName !== 'metadata') continue;
-        const n = child.getAttribute('name'), v = child.textContent.trim();
-        if (n && v) metadata[n] = v;
-      }
-
-      // Prefer object-level splitting (each <object> with a <mesh> is one part).
-      // Fall back to mesh-level if no <object> elements have direct meshes.
-      const parts = [];
-      const objects = modelEl.getElementsByTagNameNS('*', 'object');
-
-      for (const obj of objects) {
-        // Skip pure component-reference objects (they have <components>, no direct <mesh>)
-        const directMeshes = [...obj.children].filter(c => c.localName === 'mesh');
-        if (!directMeshes.length) continue;
-
-        // Combine all meshes within this object into one part
-        const combinedV = [], combinedT = [];
-        for (const mesh of directMeshes) {
-          const m = extractMesh(mesh);
-          if (!m) continue;
-          const vOff = combinedV.length / 3;
-          for (const v of m.vertices) combinedV.push(v);
-          for (const t of m.triangles) combinedT.push(t + vOff);
-        }
-        if (!combinedV.length) continue;
-
-        const name = obj.getAttribute('name')
-                  || obj.getAttribute('partname')
-                  || `Object ${obj.getAttribute('id') || parts.length + 1}`;
-        parts.push({
-          name,
-          vertices:  new Float32Array(combinedV),
-          triangles: new Uint32Array(combinedT),
-        });
-      }
-
-      // If we found no object-level parts, fall back: each free-standing <mesh> is a part.
-      if (!parts.length) {
-        let idx = 0;
-        for (const mesh of modelEl.getElementsByTagNameNS('*', 'mesh')) {
-          const m = extractMesh(mesh);
-          if (!m) continue;
-          parts.push({ name: `Mesh ${++idx}`, vertices: m.vertices, triangles: m.triangles });
-        }
-      }
-
-      return { unit, metadata, parts };
-    }
 
     /* ===================== GEOMETRY ===================== */
     // Compute global bbox over all parts; return centered/scaled per-part geometry
@@ -870,6 +722,10 @@
     let selectedColors = []; // array of { name, hex } from BAMBU_PLA
     let currentAssignment = null; // array of color objects (length === parts.length)
     let displayedAssignments = []; // currently rendered thumbnail assignments
+
+    // Scene state (from shared parser)
+    let scene = null;
+    let activePlateId = null;
 
     /* ===================== RENDER LOOP ===================== */
     function renderLoop() {
@@ -1180,7 +1036,7 @@
 
     function renderInfoPanel() {
       if (!currentInfo) { infoPanel.innerHTML = ''; return; }
-      const { metadata, unit, dims, filename, totalV, totalT } = currentInfo;
+      const { metadata, unit, dims, filename, totalV, totalT, plateName } = currentInfo;
       const rows = (obj) => Object.entries(obj)
         .map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td class="v">${esc(v)}</td></tr>`)
         .join('');
@@ -1194,17 +1050,33 @@
         [`D (${unit})`]: fmt(dims[2], ''),
       };
 
-      const partRowsHTML = parts.map((p, i) => {
-        const c = currentAssignment && currentAssignment[i];
-        const colorName = c ? c.name : '— neutral —';
-        const dotStyle = c ? `background:${c.hex}` : 'background:repeating-linear-gradient(45deg,#30363d,#30363d 4px,#21262d 4px,#21262d 8px)';
-        return `
-          <div class="part-row">
-            <span class="dot" style="${dotStyle}"></span>
-            <span class="name" title="${esc(p.name)}">${esc(p.name)}</span>
-            <span class="color-name">${esc(colorName)}</span>
-          </div>`;
-      }).join('');
+      // Group parts by parent object for the panel.
+      const groups = new Map();
+      for (let i = 0; i < parts.length; i++) {
+        const key = parts[i].objectName || '—';
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push({ part: parts[i], index: i });
+      }
+      const partsHTML = [...groups.entries()].map(([objName, items]) =>
+        `<details open class="part-group">
+           <summary>${esc(objName)} <span class="muted">(${items.length})</span></summary>
+           <ul class="part-list">
+             ${items.map(({part, index}) => {
+                const c = currentAssignment && currentAssignment[index];
+                const colorName = c ? c.name : '— neutral —';
+                const swatch = c
+                  ? `<span class="color-dot" style="background:${c.hex}"></span>`
+                  : `<span class="color-dot" style="background:repeating-linear-gradient(45deg,#30363d,#30363d 4px,#21262d 4px,#21262d 8px)"></span>`;
+                return `<li>
+                  <span class="name" title="${esc(part.name)}">${esc(part.name)}</span>
+                  <span class="color-name">${swatch}${esc(colorName)}</span>
+                </li>`;
+             }).join('')}
+           </ul>
+         </details>`
+      ).join('');
+
+      const partsHeading = plateName ? `Parts on ${esc(plateName)}` : 'Parts &amp; current colors';
 
       const metaSection = Object.keys(metadata).length ? `
         <hr class="info-divider">
@@ -1225,102 +1097,134 @@
         </div>
         <hr class="info-divider">
         <div class="info-section">
-          <div class="info-section-title">Parts &amp; current colors</div>
-          <div class="part-list">${partRowsHTML}</div>
+          <div class="info-section-title">${partsHeading}</div>
+          ${partsHTML}
         </div>
         ${metaSection}
       `;
     }
 
     /* ===================== MAIN LOAD ===================== */
-    async function loadFile(file) {
-      setError('');
-      dropLabel.textContent = 'Parsing…';
-      dropZone.style.pointerEvents = 'none';
+    function showPlate(plateId) {
+      if (!scene) return;
+      const plate = scene.plates.find(p => p.id === plateId);
+      if (!plate) return;
+      activePlateId = plateId;
 
-      try {
-        const buffer   = await file.arrayBuffer();
-        const zipFiles = await parseZip(buffer);
-
-        const modelKeys = Object.keys(zipFiles)
-          .filter(k => k.toLowerCase().endsWith('.model'))
-          .sort();
-
-        if (!modelKeys.length) {
-          const listing = Object.keys(zipFiles).slice(0, 12).join(', ');
-          throw new Error(`No .model files found in archive. Contents: ${listing}`);
+      const rawParts = [];
+      for (const inst of plate.instances) {
+        for (const part of inst.parts) {
+          rawParts.push({
+            name: part.name,
+            objectName: inst.objectName,
+            extruder: part.extruder,
+            vertices: part.vertices,
+            triangles: part.triangles,
+          });
         }
+      }
+      if (!rawParts.length) { setError('Selected plate has no geometry.'); return; }
 
-        let unit = 'millimeter', metadata = {};
-        const rawParts = [];
+      const processed = processParts(rawParts);
+      parts = processed.parts;
+      parts.forEach((pp, i) => {
+        pp.objectName = rawParts[i].objectName;
+        pp.extruder = rawParts[i].extruder;
+      });
 
-        for (const key of modelKeys) {
-          let bytes;
-          try { bytes = await inflate(zipFiles[key]); } catch { continue; }
-          const result = parse3MFDoc(new TextDecoder().decode(bytes));
-          if (!result || !result.parts.length) continue;
+      currentInfo = {
+        metadata: scene.metadata,
+        unit: scene.unit,
+        dims: processed.dims,
+        filename: scene.filename,
+        totalV: processed.totalV,
+        totalT: processed.totalT,
+        plateName: plate.name,
+      };
 
-          if (!Object.keys(metadata).length) {
-            metadata = result.metadata;
-            unit = result.unit;
-          }
-          for (const p of result.parts) {
-            // Prefix the displayed name with the source file when there's more
-            // than one model file in the archive, to keep names disambiguated.
-            const sourceTag = modelKeys.length > 1
-              ? key.split('/').pop().replace(/\.model$/i, '') + ' · '
-              : '';
-            rawParts.push({ ...p, name: sourceTag + p.name });
-          }
-        }
+      mainRenderer.uploadParts(parts);
+      thumbRenderer.uploadParts(parts);
+      theta = 0.4; phi = 0.2; camDist = 4.0;
+      if (rafId) cancelAnimationFrame(rafId);
+      renderLoop();
 
-        if (!rawParts.length)
-          throw new Error('No 3D geometry found in any model file inside the archive.');
+      seedColorsFromExtruders();
+      regenerateCombinations();
+    }
 
-        const processed = processParts(rawParts);
-        parts = processed.parts;
-
-        currentInfo = {
-          metadata, unit,
-          dims: processed.dims,
-          filename: file.name,
-          totalV: processed.totalV,
-          totalT: processed.totalT,
-        };
-
-        // Build renderers lazily on first load
-        if (!mainRenderer) {
-          viewerArea.hidden = false;
-          mainRenderer = createRenderer(canvas);
-        }
-        if (!thumbRenderer) {
-          thumbRenderer = createRenderer(thumbCanvas, { preserveDrawingBuffer: true });
-          thumbRenderer.resizeIfNeeded = () => {}; // fixed size
-        }
-
-        mainRenderer.uploadParts(parts);
-        thumbRenderer.uploadParts(parts);
-
-        theta = 0.4; phi = 0.2; camDist = 4.0;
-        if (rafId) cancelAnimationFrame(rafId);
-        viewerArea.hidden = false;
-        dropZone.hidden   = true;
-        renderLoop();
-
-        // Reset color state for the new model
+    function seedColorsFromExtruders() {
+      let maxExtruder = 0;
+      for (const p of parts) if (p.extruder && p.extruder > maxExtruder) maxExtruder = p.extruder;
+      if (!maxExtruder) {
         selectedColors = [];
         currentAssignment = null;
         renderPalette();
         renderSelectedStrip();
-        regenerateCombinations();
+        return;
+      }
+      const seedCount = Math.min(maxExtruder, MAX_COLORS);
+      selectedColors = BAMBU_PLA.slice(0, seedCount);
+      currentAssignment = parts.map(p => {
+        if (!p.extruder) return selectedColors[0];
+        const idx = Math.min(p.extruder - 1, selectedColors.length - 1);
+        return selectedColors[idx];
+      });
+      renderPalette();
+      renderSelectedStrip();
+    }
 
+    function renderPlateTabs() {
+      const el = document.getElementById('plateTabs');
+      if (!scene || scene.plates.length < 2) {
+        el.innerHTML = '';
+        el.style.display = 'none';
+        return;
+      }
+      el.style.display = '';
+      el.innerHTML = scene.plates.map(p =>
+        `<button class="plate-tab ${p.id === activePlateId ? 'active' : ''}" data-id="${p.id}">
+           ${esc(p.name)} <span class="muted">(${p.instances.length})</span>
+         </button>`
+      ).join('');
+      for (const b of el.querySelectorAll('button')) {
+        b.addEventListener('click', () => {
+          const id = parseInt(b.dataset.id, 10);
+          showPlate(id);
+          renderPlateTabs();
+          renderInfoPanel();
+        });
+      }
+    }
+
+    async function loadFile(file) {
+      setError('');
+      scene = null;
+      activePlateId = null;
+      dropLabel.textContent = 'Parsing…';
+      dropZone.style.pointerEvents = 'none';
+      try {
+        const buffer = await file.arrayBuffer();
+        scene = await window.Scene3MF.parseScene(buffer);
+        scene.filename = file.name;
+        if (!scene.plates.length) throw new Error('No printable geometry in archive.');
+
+        if (!mainRenderer) { viewerArea.hidden = false; mainRenderer = createRenderer(canvas); }
+        if (!thumbRenderer) {
+          thumbRenderer = createRenderer(thumbCanvas, { preserveDrawingBuffer: true });
+          thumbRenderer.resizeIfNeeded = () => {};
+        }
+
+        activePlateId = scene.plates[0].id;
+        showPlate(activePlateId);
+        viewerArea.hidden = false;
+        dropZone.hidden = true;
+        renderPlateTabs();
         filenameEl.textContent = file.name;
         renderInfoPanel();
-
       } catch (err) {
         setError(err.message);
         viewerArea.hidden = true;
-        dropZone.hidden   = false;
+        dropZone.hidden = false;
         console.error(err);
       } finally {
         dropLabel.textContent = 'Drop a .3mf file here';
