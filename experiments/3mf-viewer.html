@@ -157,6 +157,34 @@
 
     .canvas-hint { font-size: 0.73rem; color: #30363d; margin-top: 0.35rem; text-align: center; }
 
+    .plate-tabs {
+      display: flex;
+      gap: 0.25rem;
+      padding: 0.25rem 0;
+      margin-bottom: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .plate-tab {
+      background: #161b22;
+      border: 1px solid #30363d;
+      color: #e6edf3;
+      padding: 0.35rem 0.75rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-family: inherit;
+    }
+    .plate-tab.active {
+      border-color: #58a6ff;
+      background: #1f2933;
+    }
+    .plate-tab:hover { background: #1f2933; }
+    .part-group { margin-bottom: 0.5rem; }
+    .part-group summary { cursor: pointer; padding: 0.25rem 0; font-weight: 500; }
+    .part-list { list-style: none; padding-left: 1rem; font-size: 0.85rem; }
+    .part-list li { padding: 0.15rem 0; }
+    .muted { opacity: 0.6; }
+
     @media (max-width: 860px) {
       .viewer-layout { flex-direction: column; }
       #canvas { height: 320px; }
@@ -207,6 +235,7 @@
       </div>
       <div class="viewer-layout">
         <div style="flex:1 1 auto;min-width:0">
+          <div id="plateTabs" class="plate-tabs"></div>
           <canvas id="canvas"></canvas>
           <div class="canvas-hint">Drag to orbit &nbsp;·&nbsp; Scroll to zoom</div>
         </div>
@@ -215,167 +244,12 @@
     </div>
   </main>
 
+  <script src="./lib/3mf-parser.js"></script>
   <script>
-    /* ===================== ZIP PARSER ===================== */
+    /* ===================== STATE ===================== */
 
-    // Read a uint64 LE as a JS Number (safe for file sizes < 2^53 bytes)
-    function readU64(view, pos) {
-      return view.getUint32(pos + 4, true) * 0x100000000 + view.getUint32(pos, true);
-    }
-
-    // Scan a ZIP extra-field block for tag 0x0001 (ZIP64) and return the
-    // overriding values for whichever of (uncompressed, compressed, localOffset)
-    // were flagged as needing them (i.e. were 0xFFFFFFFF in the regular record).
-    function zip64Extra(view, start, len, needUncomp, needComp, needOffset) {
-      let pos = start, end = start + len;
-      while (pos + 4 <= end) {
-        const tag = view.getUint16(pos, true), sz = view.getUint16(pos + 2, true);
-        if (tag === 0x0001) {
-          let off = pos + 4;
-          const uncomp  = needUncomp  ? (off += 8,  readU64(view, off - 8)) : null;
-          const comp    = needComp    ? (off += 8,  readU64(view, off - 8)) : null;
-          const localOff= needOffset  ? (off += 8,  readU64(view, off - 8)) : null;
-          return { uncomp, comp, localOff };
-        }
-        pos += 4 + sz;
-      }
-      return { uncomp: null, comp: null, localOff: null };
-    }
-
-    async function parseZip(buffer) {
-      const bytes = new Uint8Array(buffer);
-      const view  = new DataView(buffer);
-
-      // Scan backwards for End of Central Directory signature PK\x05\x06
-      let eocd = -1;
-      const start = Math.max(0, bytes.length - 65558);
-      for (let i = bytes.length - 22; i >= start; i--) {
-        if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
-      }
-      if (eocd === -1) throw new Error('Not a valid ZIP / 3MF file.');
-
-      let cdCount  = view.getUint16(eocd + 10, true);
-      let cdOffset = view.getUint32(eocd + 16, true);
-
-      // ZIP64: if values are sentinel 0xFFFF / 0xFFFFFFFF, read ZIP64 EOCD
-      if (cdOffset === 0xFFFFFFFF || cdCount === 0xFFFF) {
-        // ZIP64 EOCD Locator sits 20 bytes before the regular EOCD
-        const loc = eocd - 20;
-        if (loc >= 0 && view.getUint32(loc, true) === 0x07064b50) {
-          const z64 = readU64(view, loc + 8);          // offset of ZIP64 EOCD
-          if (view.getUint32(z64, true) === 0x06064b50) {
-            cdCount  = readU64(view, z64 + 32);
-            cdOffset = readU64(view, z64 + 48);
-          }
-        }
-      }
-
-      const files = {};
-      let pos = cdOffset;
-
-      for (let i = 0; i < cdCount; i++) {
-        if (view.getUint32(pos, true) !== 0x02014b50) break; // central dir sig
-
-        const method     = view.getUint16(pos + 10, true);
-        let   compSize   = view.getUint32(pos + 20, true);
-        let   uncompSize = view.getUint32(pos + 24, true);
-        const fnLen      = view.getUint16(pos + 28, true);
-        const extraLen   = view.getUint16(pos + 30, true);
-        const commentLen = view.getUint16(pos + 32, true);
-        let   localOff   = view.getUint32(pos + 42, true);
-
-        const name = new TextDecoder().decode(bytes.slice(pos + 46, pos + 46 + fnLen));
-
-        // Resolve ZIP64 extended info for any sentinel values
-        if (compSize === 0xFFFFFFFF || uncompSize === 0xFFFFFFFF || localOff === 0xFFFFFFFF) {
-          const z = zip64Extra(view, pos + 46 + fnLen, extraLen,
-            uncompSize === 0xFFFFFFFF, compSize === 0xFFFFFFFF, localOff === 0xFFFFFFFF);
-          if (z.uncomp   !== null) uncompSize = z.uncomp;
-          if (z.comp     !== null) compSize   = z.comp;
-          if (z.localOff !== null) localOff   = z.localOff;
-        }
-
-        // Local file header: skip to data
-        const lhFnLen    = view.getUint16(localOff + 26, true);
-        const lhExtraLen = view.getUint16(localOff + 28, true);
-        const dataStart  = localOff + 30 + lhFnLen + lhExtraLen;
-
-        files[name] = { method, data: bytes.slice(dataStart, dataStart + compSize), uncompSize };
-
-        pos += 46 + fnLen + extraLen + commentLen;
-      }
-
-      return files;
-    }
-
-    async function inflate(entry) {
-      if (entry.method === 0) return entry.data; // stored
-      if (entry.method !== 8) throw new Error('Unsupported ZIP compression method: ' + entry.method);
-
-      const ds     = new DecompressionStream('deflate-raw');
-      const writer = ds.writable.getWriter();
-      const reader = ds.readable.getReader();
-
-      writer.write(entry.data);
-      writer.close();
-
-      const chunks = [];
-      let total = 0;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        total += value.length;
-      }
-
-      const out = new Uint8Array(total);
-      let off = 0;
-      for (const c of chunks) { out.set(c, off); off += c.length; }
-      return out;
-    }
-
-    /* ===================== 3MF PARSER ===================== */
-
-    // Parse one .model XML string. Returns { unit, metadata, vertices, triangles }
-    // or null if the XML is invalid / contains no geometry.
-    // Does NOT throw — callers combine results across multiple files.
-    function parse3MFDoc(xmlText) {
-      let doc;
-      try { doc = new DOMParser().parseFromString(xmlText, 'application/xml'); }
-      catch { return null; }
-      if (doc.querySelector('parsererror')) return null;
-
-      const modelEl = doc.documentElement;
-      const unit    = modelEl.getAttribute('unit') || 'millimeter';
-
-      // Metadata: direct children of <model>
-      const metadata = {};
-      for (const child of modelEl.children) {
-        if (child.localName !== 'metadata') continue;
-        const n = child.getAttribute('name'), v = child.textContent.trim();
-        if (n && v) metadata[n] = v;
-      }
-
-      // Collect geometry from every <mesh> in this document.
-      // Each <mesh> has its own local vertex numbering; we apply a running
-      // offset so all triangles index into a single flat vertex array.
-      const verts = [], tris = [];
-      for (const mesh of modelEl.getElementsByTagNameNS('*', 'mesh')) {
-        const vOff = verts.length / 3;
-        for (const v of mesh.getElementsByTagNameNS('*', 'vertex'))
-          verts.push(parseFloat(v.getAttribute('x')) || 0,
-                     parseFloat(v.getAttribute('y')) || 0,
-                     parseFloat(v.getAttribute('z')) || 0);
-        for (const t of mesh.getElementsByTagNameNS('*', 'triangle'))
-          tris.push((parseInt(t.getAttribute('v1')) || 0) + vOff,
-                    (parseInt(t.getAttribute('v2')) || 0) + vOff,
-                    (parseInt(t.getAttribute('v3')) || 0) + vOff);
-      }
-
-      if (!verts.length) return null; // assembly-only file — no geometry here
-
-      return { unit, metadata, vertices: new Float32Array(verts), triangles: new Uint32Array(tris) };
-    }
+    let scene = null;
+    let activePlateId = null;
 
     /* ===================== GEOMETRY ===================== */
 
@@ -691,7 +565,7 @@
         .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
-    function renderInfo(metadata, unit, stats, dims, filename) {
+    function renderInfo(metadata, unit, stats, dims, filename, partsForPanel = [], plate = null) {
       const rows = (obj) => Object.entries(obj)
         .map(([k,v]) => `<tr><td class="k">${esc(k)}</td><td class="v">${esc(v)}</td></tr>`)
         .join('');
@@ -711,6 +585,31 @@
           <table class="info-table">${rows(metadata)}</table>
         </div>` : '';
 
+      let partsSection = '';
+      if (partsForPanel.length) {
+        const groups = new Map();
+        for (const p of partsForPanel) {
+          const key = p.objectName || '—';
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(p);
+        }
+        const groupsHTML = [...groups.entries()].map(([objName, group]) =>
+          `<details open class="part-group">
+             <summary>${esc(objName)} <span class="muted">(${group.length})</span></summary>
+             <ul class="part-list">
+               ${group.map(p => `<li>${esc(p.name)}<span class="muted"> · ${p.triangleCount.toLocaleString()} tri</span></li>`).join('')}
+             </ul>
+           </details>`
+        ).join('');
+        const heading = plate ? `Parts on ${esc(plate.name)}` : 'Parts';
+        partsSection = `
+          <hr class="info-divider">
+          <div class="info-section">
+            <div class="info-section-title">${heading}</div>
+            ${groupsHTML}
+          </div>`;
+      }
+
       infoPanel.innerHTML = `
         <div class="info-section">
           <div class="info-section-title">File</div>
@@ -721,6 +620,7 @@
           <div class="info-section-title">Geometry</div>
           <table class="info-table">${rows(geom)}</table>
         </div>
+        ${partsSection}
         ${metaSection}
       `;
     }
@@ -731,77 +631,87 @@
       setError('');
       dropLabel.textContent = 'Parsing…';
       dropZone.style.pointerEvents = 'none';
-
       try {
-        const buffer   = await file.arrayBuffer();
-        const zipFiles = await parseZip(buffer);
+        const buffer = await file.arrayBuffer();
+        scene = await window.Scene3MF.parseScene(buffer);
+        scene.filename = file.name;
+        if (!scene.plates.length) throw new Error('No printable geometry in archive.');
+        activePlateId = scene.plates[0].id;
 
-        // Many 3MF files (Bambu/MakerWorld, Prusa, etc.) use the 3MF Production
-        // Extension: the top-level 3dmodel.model contains only component
-        // references while the actual geometry lives in 3D/Objects/*.model.
-        // Strategy: parse EVERY .model file in the archive and combine geometry.
-        const modelKeys = Object.keys(zipFiles)
-          .filter(k => k.toLowerCase().endsWith('.model'))
-          .sort();
-
-        if (!modelKeys.length) {
-          const listing = Object.keys(zipFiles).slice(0, 12).join(', ');
-          throw new Error(`No .model files found in archive. Contents: ${listing}`);
-        }
-
-        let unit = 'millimeter', metadata = {};
-        const allV = [], allT = [];
-        let totalVerts = 0;
-
-        for (const key of modelKeys) {
-          let bytes;
-          try { bytes = await inflate(zipFiles[key]); } catch { continue; }
-          const result = parse3MFDoc(new TextDecoder().decode(bytes));
-          if (!result) continue;                            // skip assembly-only files
-
-          // Take metadata from the first file that has any
-          if (!Object.keys(metadata).length) {
-            metadata = result.metadata;
-            unit     = result.unit;
-          }
-
-          // Append vertices; offset triangle indices by the running vertex count
-          for (const v of result.vertices) allV.push(v);
-          for (const t of result.triangles) allT.push(t + totalVerts);
-          totalVerts += result.vertices.length / 3;
-        }
-
-        if (!allV.length)
-          throw new Error('No 3D geometry found in any model file inside the archive.');
-
-        const vertices  = new Float32Array(allV);
-        const triangles = new Uint32Array(allT);
-        const stats     = { vertices: totalVerts, triangles: allT.length / 3 };
-
-        const { verts, normals, indices, dims } = processGeometry(vertices, triangles);
-
-        // Init WebGL on first load (canvas must be visible to measure clientWidth)
+        // Init WebGL on first load (canvas must be visible to measure clientWidth).
         if (!gl) { viewerArea.hidden = false; initWebGL(canvas); }
 
-        uploadMesh(verts, normals, indices);
-
-        theta = 0.4; phi = 0.2; camDist = 4.0;
-        if (rafId) cancelAnimationFrame(rafId);
+        showPlate(activePlateId);
         viewerArea.hidden = false;
-        dropZone.hidden   = true;
-        render();
-
+        dropZone.hidden = true;
         filenameEl.textContent = file.name;
-        renderInfo(metadata, unit, stats, dims, file.name);
-
+        renderPlateTabs();
       } catch (err) {
         setError(err.message);
         viewerArea.hidden = true;
-        dropZone.hidden   = false;
+        dropZone.hidden = false;
         console.error(err);
       } finally {
         dropLabel.textContent = 'Drop a .3mf file here';
         dropZone.style.pointerEvents = '';
+      }
+    }
+
+    function showPlate(plateId) {
+      const plate = scene.plates.find(p => p.id === plateId);
+      if (!plate) return;
+      activePlateId = plateId;
+
+      // Concatenate every part in every instance into one big vertex/triangle buffer.
+      // Offset each part's triangle indices by the running vertex count so the
+      // existing single-mesh pipeline (processGeometry + uploadMesh) keeps working.
+      const allV = [], allT = [];
+      let runningVertCount = 0;
+      const partsForPanel = [];
+      for (const inst of plate.instances) {
+        for (const part of inst.parts) {
+          for (const v of part.vertices) allV.push(v);
+          for (const t of part.triangles) allT.push(t + runningVertCount);
+          const triCount = part.triangles.length / 3;
+          partsForPanel.push({ objectName: inst.objectName, name: part.name, triangleCount: triCount });
+          runningVertCount += part.vertices.length / 3;
+        }
+      }
+
+      if (!allV.length) { setError('Selected plate has no geometry.'); return; }
+
+      const vertices  = new Float32Array(allV);
+      const triangles = new Uint32Array(allT);
+      const stats     = { vertices: runningVertCount, triangles: allT.length / 3 };
+      const { verts, normals, indices, dims } = processGeometry(vertices, triangles);
+      uploadMesh(verts, normals, indices);
+
+      theta = 0.4; phi = 0.2; camDist = 4.0;
+      if (rafId) cancelAnimationFrame(rafId);
+      render();
+
+      renderInfo(scene.metadata, scene.unit, stats, dims, scene.filename, partsForPanel, plate);
+    }
+
+    function renderPlateTabs() {
+      const el = document.getElementById('plateTabs');
+      if (!scene || scene.plates.length < 2) {
+        el.innerHTML = '';
+        el.style.display = 'none';
+        return;
+      }
+      el.style.display = '';
+      el.innerHTML = scene.plates.map(p =>
+        `<button class="plate-tab ${p.id === activePlateId ? 'active' : ''}" data-id="${p.id}">
+           ${esc(p.name)} <span style="opacity:0.6">(${p.instances.length})</span>
+         </button>`
+      ).join('');
+      for (const b of el.querySelectorAll('button')) {
+        b.addEventListener('click', () => {
+          const id = parseInt(b.dataset.id, 10);
+          showPlate(id);
+          renderPlateTabs();
+        });
       }
     }
   </script>
