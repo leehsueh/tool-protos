@@ -331,6 +331,28 @@
       border: 1px solid rgba(255,255,255,0.18);
     }
 
+    .saved-section { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid #21262d; }
+    .saved-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; }
+    .saved-title { font-size: 0.85rem; font-weight: 600; color: #e6edf3; }
+    .saved-empty { font-size: 0.8rem; padding: 0.5rem 0; }
+    .saved-strip { display: flex; gap: 0.5rem; overflow-x: auto; padding-bottom: 0.25rem; }
+    .saved-card { flex: 0 0 110px; background: #161b22; border: 1px solid #30363d; border-radius: 6px; overflow: hidden; cursor: pointer; transition: border-color 0.1s; }
+    .saved-card:hover { border-color: #58a6ff; }
+    .saved-card.active { border-color: #58a6ff; box-shadow: 0 0 0 1px #58a6ff; }
+    .saved-card img { display: block; width: 100%; height: 110px; object-fit: cover; background: #0d1117; }
+    .saved-card-footer { display: flex; align-items: center; justify-content: space-between; padding: 0.3rem 0.4rem; gap: 0.25rem; }
+    .saved-card-name { font-size: 0.75rem; color: #e6edf3; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+    .saved-card-del {
+      background: transparent; border: none; color: #8b949e; cursor: pointer; padding: 0 0.25rem;
+      font-size: 0.85rem; line-height: 1; border-radius: 3px;
+    }
+    .saved-card-del:hover { background: #30363d; color: #f85149; }
+    .action-btn {
+      background: #238636; border: 1px solid #2ea043; color: #ffffff;
+      padding: 0.3rem 0.7rem; border-radius: 5px; cursor: pointer; font: inherit; font-size: 0.8rem;
+    }
+    .action-btn:hover { background: #2ea043; }
+
     @media (max-width: 860px) {
       .viewer-layout { flex-direction: column; }
       #canvas { height: 340px; }
@@ -448,6 +470,14 @@
       </div>
       <div id="combo-message" class="combo-message" hidden></div>
       <div id="thumbnails" class="thumbnails"></div>
+
+      <div id="saved-section" class="saved-section" hidden>
+        <div class="saved-header">
+          <span class="saved-title">Saved combos</span>
+          <button id="save-current-btn" class="action-btn">+ Save current</button>
+        </div>
+        <div id="saved-strip" class="saved-strip"></div>
+      </div>
     </div>
   </main>
 
@@ -1207,6 +1237,10 @@
     let partGroupId = []; // partGroupId[i] is the group id for parts[i]
     let selectedPartIndices = new Set(); // parts the user has checked in the panel
 
+    // Saved snapshots (session-only)
+    let savedSnapshots = []; // [{ id, name, thumbnailDataURL, selectedColorsSnapshot, partGroupIdSnapshot, currentAssignmentSnapshot }]
+    let snapshotCounter = 0;
+
     // Scene state (from shared parser)
     let scene = null;
     let activePlateId = null;
@@ -1626,6 +1660,7 @@
         comboMsgEl.hidden = true;
         thumbsEl.innerHTML = '';
         renderInfoPanel();
+        renderSavedStrip();
         return;
       }
 
@@ -1680,6 +1715,7 @@
       }
 
       renderInfoPanel();
+      renderSavedStrip();
     }
 
     function expandGroupAssignmentToParts(assignment) {
@@ -1757,6 +1793,7 @@
           for (const sibling of gridEl.children) sibling.classList.remove('active');
           card.classList.add('active');
           renderInfoPanel();
+          renderSavedStrip();
         });
 
         gridEl.append(card);
@@ -1767,6 +1804,103 @@
       if (!a || !b || a.length !== b.length) return false;
       for (let i = 0; i < a.length; i++) if (a[i].hex !== b[i].hex) return false;
       return true;
+    }
+
+    /* ===================== SAVED SNAPSHOTS ===================== */
+    const savedSectionEl = document.getElementById('saved-section');
+    const savedStripEl = document.getElementById('saved-strip');
+    document.getElementById('save-current-btn').addEventListener('click', saveCurrentSnapshot);
+
+    function saveCurrentSnapshot() {
+      if (!parts.length || !currentAssignment) return;
+      const colors = currentColorsForRender();
+      thumbRenderer.render(theta, phi, camDist, colors);
+      const thumbnailDataURL = thumbCanvas.toDataURL('image/png');
+      snapshotCounter++;
+      savedSnapshots.push({
+        id: 's' + Date.now() + '-' + snapshotCounter,
+        name: `Combo ${snapshotCounter}`,
+        thumbnailDataURL,
+        selectedColorsSnapshot: selectedColors.slice(),
+        partGroupIdSnapshot: partGroupId.slice(),
+        currentAssignmentSnapshot: currentAssignment.slice(),
+      });
+      renderSavedStrip();
+    }
+
+    function restoreSnapshot(id) {
+      const s = savedSnapshots.find(x => x.id === id);
+      if (!s) return;
+      if (s.partGroupIdSnapshot.length !== parts.length) {
+        console.warn('Snapshot is from a different plate; ignoring restore.');
+        return;
+      }
+      selectedColors = s.selectedColorsSnapshot.slice();
+      partGroupId = s.partGroupIdSnapshot.slice();
+      currentAssignment = s.currentAssignmentSnapshot.slice();
+      selectedPartIndices.clear();
+      renderPalette();
+      renderSelectedStrip();
+      regenerateCombinations();
+      renderInfoPanel();
+      renderSavedStrip();
+    }
+
+    function deleteSnapshot(id) {
+      savedSnapshots = savedSnapshots.filter(s => s.id !== id);
+      renderSavedStrip();
+    }
+
+    function renameSnapshot(id) {
+      const s = savedSnapshots.find(x => x.id === id);
+      if (!s) return;
+      const newName = prompt('Name this combo:', s.name);
+      if (newName && newName.trim()) {
+        s.name = newName.trim();
+        renderSavedStrip();
+      }
+    }
+
+    function findActiveSnapshotId() {
+      if (!currentAssignment) return null;
+      for (const s of savedSnapshots) {
+        if (s.partGroupIdSnapshot.length !== partGroupId.length) continue;
+        if (s.currentAssignmentSnapshot.length !== currentAssignment.length) continue;
+        let match = true;
+        for (let i = 0; i < partGroupId.length; i++) {
+          if (s.partGroupIdSnapshot[i] !== partGroupId[i]) { match = false; break; }
+        }
+        if (!match) continue;
+        for (let i = 0; i < currentAssignment.length; i++) {
+          if (s.currentAssignmentSnapshot[i].hex !== currentAssignment[i].hex) { match = false; break; }
+        }
+        if (match) return s.id;
+      }
+      return null;
+    }
+
+    function renderSavedStrip() {
+      savedSectionEl.hidden = !parts.length;
+      if (!savedSnapshots.length) {
+        savedStripEl.innerHTML = '<div class="saved-empty muted">No saved combos yet. Click + Save current to capture the current colors.</div>';
+        return;
+      }
+      const activeId = findActiveSnapshotId();
+      savedStripEl.innerHTML = savedSnapshots.map(s =>
+        `<div class="saved-card ${s.id === activeId ? 'active' : ''}" data-id="${s.id}">
+           <img src="${s.thumbnailDataURL}" alt="${esc(s.name)}">
+           <div class="saved-card-footer">
+             <span class="saved-card-name" title="Click to rename">${esc(s.name)}</span>
+             <button class="saved-card-del" title="Delete">✕</button>
+           </div>
+         </div>`
+      ).join('');
+      for (const card of savedStripEl.querySelectorAll('.saved-card')) {
+        const id = card.dataset.id;
+        card.querySelector('img').addEventListener('click', () => restoreSnapshot(id));
+        card.querySelector('.saved-card-name').addEventListener('click', (e) => { e.stopPropagation(); renameSnapshot(id); });
+        card.querySelector('.saved-card-del').addEventListener('click', (e) => { e.stopPropagation(); deleteSnapshot(id); });
+      }
     }
 
     /* ===================== INFO PANEL ===================== */
@@ -1875,6 +2009,9 @@
       const plate = scene.plates.find(p => p.id === plateId);
       if (!plate) return;
       activePlateId = plateId;
+      // Plate switch invalidates snapshots — partGroupId/parts identity changes.
+      savedSnapshots = [];
+      snapshotCounter = 0;
 
       const rawParts = [];
       let instanceIdx = 0;
@@ -1989,6 +2126,8 @@
       setError('');
       scene = null;
       activePlateId = null;
+      savedSnapshots = [];
+      snapshotCounter = 0;
       dropLabel.textContent = 'Parsing…';
       dropZone.style.pointerEvents = 'none';
       try {
