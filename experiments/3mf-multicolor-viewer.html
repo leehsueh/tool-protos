@@ -1568,12 +1568,15 @@
     /* ===================== COLOR PALETTE ===================== */
     function renderPalette() {
       paletteEl.innerHTML = '';
+      const assignMode = selectedPartIndices.size > 0;
       for (const c of BAMBU_PLA) {
         const sel = selectedColors.some(s => s.hex === c.hex);
         const div = document.createElement('div');
+        // In assign mode, every swatch is clickable (it paints the selection).
+        // Otherwise palette respects the MAX_COLORS cap.
         div.className = 'color-swatch'
           + (sel ? ' selected' : '')
-          + (!sel && selectedColors.length >= MAX_COLORS ? ' disabled' : '')
+          + (!assignMode && !sel && selectedColors.length >= MAX_COLORS ? ' disabled' : '')
           + (c.light ? ' light' : '');
         div.style.background = c.hex;
         div.title = c.name + ' — ' + c.hex;
@@ -1609,6 +1612,12 @@
     }
 
     function toggleColor(c) {
+      // If parts are checked in the panel, palette clicks apply the color to
+      // every group touched by the selection instead of toggling palette membership.
+      if (selectedPartIndices.size > 0) {
+        applyColorToSelection(c);
+        return;
+      }
       const idx = selectedColors.findIndex(s => s.hex === c.hex);
       if (idx >= 0) {
         selectedColors.splice(idx, 1);
@@ -1618,6 +1627,38 @@
         return;
       }
       onColorsChanged();
+    }
+
+    function applyColorToSelection(c) {
+      if (!selectedPartIndices.size || !currentAssignment) return;
+      // If there's room in the palette and this color isn't already there,
+      // add it (and let the combinations grid regenerate to include it).
+      // Otherwise apply as a one-off paint without disturbing selectedColors.
+      const alreadyInPalette = selectedColors.some(s => s.hex === c.hex);
+      const addedToPalette = !alreadyInPalette && selectedColors.length < MAX_COLORS;
+      if (addedToPalette) selectedColors.push(c);
+
+      const touchedGids = new Set();
+      for (const i of selectedPartIndices) touchedGids.add(partGroupId[i]);
+      const allGroupIds = getDistinctGroupIds();
+      allGroupIds.forEach((gid, idx) => {
+        if (touchedGids.has(gid)) currentAssignment[idx] = c;
+      });
+
+      renderPalette();
+      renderSelectedStrip();
+      if (addedToPalette) {
+        // Palette changed → rebuild the per-instance grids (and ensure the
+        // sweep inside regenerateCombinations preserves our new assignments
+        // because c is now in selectedColors).
+        regenerateCombinations();
+      } else {
+        // Palette unchanged → just refresh the existing thumbnails so they
+        // composite the updated group colors for *other* instances.
+        refreshThumbnailsAtCurrentAngle();
+      }
+      renderInfoPanel();
+      renderSavedStrip();
     }
 
     function onColorsChanged() {
@@ -1967,7 +2008,7 @@
         const canUngroup = [...selectedPartIndices].some(i => isPartInMultiGroup(i));
         actionBarHTML = `
           <div class="action-bar">
-            <span class="muted">${selectedPartIndices.size} selected</span>
+            <span class="muted">${selectedPartIndices.size} selected · click a palette color to paint them</span>
             <button onclick="groupSelected()" ${canGroup ? '' : 'disabled'}>Group</button>
             <button onclick="ungroupSelected()" ${canUngroup ? '' : 'disabled'}>Ungroup</button>
             <button onclick="clearPartSelection()">Clear</button>
