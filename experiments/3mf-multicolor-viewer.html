@@ -279,6 +279,18 @@
       margin-bottom: 0.75rem;
     }
     .thumbnails {
+      display: block;
+    }
+    .instance-combos { margin-bottom: 1.25rem; }
+    .instance-combos-heading {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #e6edf3;
+      margin-bottom: 0.4rem;
+      padding-bottom: 0.3rem;
+      border-bottom: 1px solid #21262d;
+    }
+    .thumbs-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
       gap: 12px;
@@ -1189,7 +1201,7 @@
     // Color state
     let selectedColors = []; // array of { name, hex } from BAMBU_PLA (or synthesized)
     let currentAssignment = null; // array of color objects (length === distinct group count)
-    let displayedAssignments = []; // currently rendered thumbnail assignments
+    let displayedAssignmentsByInstance = {}; // instanceKey -> { assignments, groupIds }
 
     // Grouping state
     let partGroupId = []; // partGroupId[i] is the group id for parts[i]
@@ -1243,6 +1255,46 @@
       let count = 0;
       for (const g of partGroupId) if (g === gid) { count++; if (count > 1) return true; }
       return false;
+    }
+
+    // Returns ordered list of distinct instance keys in the order they first appear.
+    function getInstanceKeys() {
+      const seen = new Set();
+      const out = [];
+      for (const p of parts) {
+        if (!seen.has(p.instanceKey)) { seen.add(p.instanceKey); out.push(p.instanceKey); }
+      }
+      return out;
+    }
+
+    // For an instance key, returns the distinct group IDs that have at least one
+    // part in that instance (in first-appearance order across parts of that instance).
+    function getInstanceGroupIds(instanceKey) {
+      const seen = new Set();
+      const out = [];
+      for (let i = 0; i < parts.length; i++) {
+        if (parts[i].instanceKey !== instanceKey) continue;
+        const gid = partGroupId[i];
+        if (!seen.has(gid)) { seen.add(gid); out.push(gid); }
+      }
+      return out;
+    }
+
+    // Returns the friendly name to show for an instance (its objectName, with
+    // a disambiguator suffix when two instances share the same objectName).
+    function getInstanceDisplayName(instanceKey) {
+      const keys = getInstanceKeys();
+      const names = keys.map(k => {
+        for (const p of parts) if (p.instanceKey === k) return p.objectName;
+        return '—';
+      });
+      const myIdx = keys.indexOf(instanceKey);
+      const myName = names[myIdx];
+      const duplicates = names.filter(n => n === myName).length;
+      if (duplicates <= 1) return myName;
+      let count = 0;
+      for (let i = 0; i <= myIdx; i++) if (names[i] === myName) count++;
+      return `${myName} (${count} of ${duplicates})`;
     }
 
     function groupSelected() {
@@ -1569,7 +1621,7 @@
 
       if (!selectedColors.length) {
         currentAssignment = null;
-        displayedAssignments = [];
+        displayedAssignmentsByInstance = {};
         comboCountEl.textContent = 'pick colors above to see combinations';
         comboMsgEl.hidden = true;
         thumbsEl.innerHTML = '';
@@ -1577,32 +1629,56 @@
         return;
       }
 
-      const P = getDistinctGroupIds().length;
+      const totalGroupCount = getDistinctGroupIds().length;
       const K = selectedColors.length;
-      const totalCount = Math.pow(K, P);
-      const assignments = enumerateAssignments(selectedColors, P);
 
-      comboCountEl.textContent = `${totalCount.toLocaleString()} total (${K} color${K>1?'s':''} × ${P} group${P>1?'s':''})`;
-      if (totalCount > MAX_THUMBS) {
-        comboMsgEl.hidden = false;
-        comboMsgEl.textContent = `Showing first ${MAX_THUMBS} of ${totalCount} combinations. Reduce the number of selected colors to see them all.`;
+      // Ensure currentAssignment is sized to total groups.
+      if (!currentAssignment || currentAssignment.length !== totalGroupCount) {
+        currentAssignment = new Array(totalGroupCount).fill(selectedColors[0]);
       } else {
-        comboMsgEl.hidden = true;
-      }
-
-      // Default the main view to the first assignment if nothing is set yet,
-      // or if the existing assignment no longer matches the part count.
-      if (!currentAssignment || currentAssignment.length !== P) {
-        currentAssignment = assignments[0].slice();
-      } else {
-        // If any current color is not in the selection, swap it for the first selected.
         currentAssignment = currentAssignment.map(c =>
           selectedColors.some(s => s.hex === c.hex) ? c : selectedColors[0]
         );
       }
 
-      displayedAssignments = assignments.slice(0, MAX_THUMBS);
-      renderThumbnails(displayedAssignments);
+      // Build per-instance grids.
+      thumbsEl.innerHTML = '';
+      displayedAssignmentsByInstance = {};
+      const instanceKeys = getInstanceKeys();
+      let totalShown = 0, totalAvailable = 0;
+
+      for (const instKey of instanceKeys) {
+        const instGroupIds = getInstanceGroupIds(instKey);
+        const Pi = instGroupIds.length;
+        if (!Pi) continue;
+        const totalCount = Math.pow(K, Pi);
+        const assignments = enumerateAssignments(selectedColors, Pi);
+        const displayed = assignments.slice(0, MAX_THUMBS);
+        displayedAssignmentsByInstance[instKey] = { assignments: displayed, groupIds: instGroupIds };
+        totalShown += displayed.length;
+        totalAvailable += totalCount;
+
+        const section = document.createElement('div');
+        section.className = 'instance-combos';
+        const heading = document.createElement('div');
+        heading.className = 'instance-combos-heading';
+        heading.innerHTML = `${esc(getInstanceDisplayName(instKey))} <span class="muted">· ${displayed.length} of ${totalCount.toLocaleString()}</span>`;
+        section.append(heading);
+
+        const grid = document.createElement('div');
+        grid.className = 'thumbs-grid';
+        section.append(grid);
+        thumbsEl.append(section);
+
+        renderThumbnailsForInstance(grid, displayed, instGroupIds, instKey);
+      }
+
+      comboCountEl.textContent = `${totalShown.toLocaleString()} thumbnails shown across ${instanceKeys.length} object${instanceKeys.length>1?'s':''} · ${totalAvailable.toLocaleString()} total possible`;
+      comboMsgEl.hidden = totalAvailable <= totalShown;
+      if (!comboMsgEl.hidden) {
+        comboMsgEl.textContent = `Each grid is capped at ${MAX_THUMBS} thumbnails. Reduce selected colors to see all combinations.`;
+      }
+
       renderInfoPanel();
     }
 
@@ -1618,29 +1694,48 @@
     }
 
     function refreshThumbnailsAtCurrentAngle() {
-      if (!thumbRenderer || !displayedAssignments.length) return;
-      const imgs = thumbsEl.querySelectorAll('.thumb img');
-      for (let i = 0; i < displayedAssignments.length && i < imgs.length; i++) {
-        const colors = expandGroupAssignmentToParts(displayedAssignments[i]);
-        thumbRenderer.render(theta, phi, camDist, colors);
-        imgs[i].src = thumbCanvas.toDataURL('image/png');
-      }
+      if (!thumbRenderer) return;
+      const allGroupIds = getDistinctGroupIds();
+      const allGidToIndex = new Map();
+      allGroupIds.forEach((gid, i) => allGidToIndex.set(gid, i));
+
+      const sections = thumbsEl.querySelectorAll('.instance-combos');
+      const instKeys = Object.keys(displayedAssignmentsByInstance);
+      sections.forEach((section, sIdx) => {
+        const instKey = instKeys[sIdx];
+        if (!instKey) return;
+        const { assignments, groupIds: instGroupIds } = displayedAssignmentsByInstance[instKey];
+        const imgs = section.querySelectorAll('.thumbs-grid .thumb img');
+        for (let i = 0; i < assignments.length && i < imgs.length; i++) {
+          const fullAssignment = currentAssignment.slice();
+          instGroupIds.forEach((gid, j) => { fullAssignment[allGidToIndex.get(gid)] = assignments[i][j]; });
+          const colors = expandGroupAssignmentToParts(fullAssignment);
+          thumbRenderer.render(theta, phi, camDist, colors);
+          imgs[i].src = thumbCanvas.toDataURL('image/png');
+        }
+      });
     }
 
     /* ===================== THUMBNAIL GENERATION ===================== */
-    function renderThumbnails(assignments) {
-      thumbsEl.innerHTML = '';
+    function renderThumbnailsForInstance(gridEl, assignments, instGroupIds, instKey) {
       if (!assignments.length || !thumbRenderer) return;
+      const allGroupIds = getDistinctGroupIds();
+      const allGidToIndex = new Map();
+      allGroupIds.forEach((gid, i) => allGidToIndex.set(gid, i));
 
       for (const assignment of assignments) {
-        const colors = expandGroupAssignmentToParts(assignment);
-        // Render to offscreen GL canvas, then copy as data URL
+        const fullAssignment = currentAssignment.slice();
+        instGroupIds.forEach((gid, i) => { fullAssignment[allGidToIndex.get(gid)] = assignment[i]; });
+        const colors = expandGroupAssignmentToParts(fullAssignment);
+
         thumbRenderer.render(theta, phi, camDist, colors);
         const dataURL = thumbCanvas.toDataURL('image/png');
 
         const card = document.createElement('div');
         card.className = 'thumb';
-        if (assignmentsEqual(assignment, currentAssignment)) card.classList.add('active');
+        const isActive = instGroupIds.every((gid, i) =>
+          currentAssignment[allGidToIndex.get(gid)]?.hex === assignment[i].hex);
+        if (isActive) card.classList.add('active');
 
         const img = document.createElement('img');
         img.src = dataURL;
@@ -1658,14 +1753,13 @@
 
         card.append(img, labels);
         card.addEventListener('click', () => {
-          currentAssignment = assignment.slice();
-          // Mark active without regenerating thumbnails
-          for (const c of thumbsEl.children) c.classList.remove('active');
+          instGroupIds.forEach((gid, i) => { currentAssignment[allGidToIndex.get(gid)] = assignment[i]; });
+          for (const sibling of gridEl.children) sibling.classList.remove('active');
           card.classList.add('active');
           renderInfoPanel();
         });
 
-        thumbsEl.append(card);
+        gridEl.append(card);
       }
     }
 
@@ -1783,11 +1877,14 @@
       activePlateId = plateId;
 
       const rawParts = [];
+      let instanceIdx = 0;
       for (const inst of plate.instances) {
+        const instanceKey = `${plate.id}#${instanceIdx++}#${inst.objectId}`;
         for (const part of inst.parts) {
           rawParts.push({
             name: part.name,
             objectName: inst.objectName,
+            instanceKey,
             extruder: part.extruder,
             vertices: part.vertices,
             triangles: part.triangles,
@@ -1801,6 +1898,7 @@
       parts.forEach((pp, i) => {
         pp.objectName = rawParts[i].objectName;
         pp.extruder = rawParts[i].extruder;
+        pp.instanceKey = rawParts[i].instanceKey;
       });
 
       currentInfo = {
