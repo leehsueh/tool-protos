@@ -352,6 +352,25 @@
     .part-group .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .color-dot { display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 50%; margin-right: 0.35rem; vertical-align: middle; border: 1px solid #30363d; }
     .muted { opacity: 0.6; }
+
+    .action-bar { display: flex; gap: 0.5rem; align-items: center; padding: 0.5rem 0; flex-wrap: wrap; }
+    .action-bar button {
+      background: #21262d; border: 1px solid #30363d; color: #e6edf3;
+      padding: 0.25rem 0.65rem; border-radius: 5px; cursor: pointer; font: inherit; font-size: 0.8rem;
+    }
+    .action-bar button:hover:not(:disabled) { background: #30363d; }
+    .action-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .part-group .part-list li { gap: 0.5rem; }
+    .part-group .part-list li input[type=checkbox] { margin: 0; cursor: pointer; flex-shrink: 0; }
+    .part-group .part-list li.in-group { border-left: 3px solid var(--group-color, #30363d); padding-left: 0.5rem; margin-left: -0.5rem; }
+
+    .meta-html { line-height: 1.4; font-size: 0.85rem; max-width: 100%; overflow-wrap: anywhere; }
+    .meta-html h1, .meta-html h2, .meta-html h3, .meta-html h4 { margin: 0.5rem 0 0.25rem; line-height: 1.2; }
+    .meta-html p { margin: 0.25rem 0; }
+    .meta-html a { color: #58a6ff; }
+    .meta-html table { border-collapse: collapse; }
+    .meta-html img { max-width: 100%; height: auto; }
+    .meta-html ul, .meta-html ol { padding-left: 1.25rem; margin: 0.25rem 0; }
   </style>
 </head>
 <body>
@@ -800,6 +819,19 @@
       } catch (e) { console.warn('Failed to parse model_settings.config:', e.message); }
     }
 
+    // Optional Bambu project settings (gives us actual filament colors used in the print).
+    const projectKey = Object.keys(zipFiles).find(k => /metadata\/project_settings\.config$/i.test(k));
+    let filamentColors = [];
+    if (projectKey) {
+      try {
+        const bytes = await inflate(zipFiles[projectKey]);
+        const json = JSON.parse(new TextDecoder().decode(bytes));
+        if (Array.isArray(json.filament_colour)) {
+          filamentColors = json.filament_colour.filter(c => typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c));
+        }
+      } catch (e) { console.warn('Failed to parse project_settings.config:', e.message); }
+    }
+
     // Build one instance per <build><item>.
     const instances = root.buildItems.map((bi) => {
       const leaves = [];
@@ -859,6 +891,7 @@
       filename: '',
       unit: root.unit,
       metadata: root.rootMetadata,
+      filamentColors,
       plates,
     };
   }
@@ -1154,9 +1187,13 @@
     let rafId = null;
 
     // Color state
-    let selectedColors = []; // array of { name, hex } from BAMBU_PLA
-    let currentAssignment = null; // array of color objects (length === parts.length)
+    let selectedColors = []; // array of { name, hex } from BAMBU_PLA (or synthesized)
+    let currentAssignment = null; // array of color objects (length === distinct group count)
     let displayedAssignments = []; // currently rendered thumbnail assignments
+
+    // Grouping state
+    let partGroupId = []; // partGroupId[i] is the group id for parts[i]
+    let selectedPartIndices = new Set(); // parts the user has checked in the panel
 
     // Scene state (from shared parser)
     let scene = null;
@@ -1172,14 +1209,99 @@
     }
 
     function currentColorsForRender() {
-      // Returns an array of RGB triples (one per part). Missing parts get neutral gray.
+      // Returns an array of RGB triples (one per part). Color comes from the
+      // part's group via currentAssignment. Missing/unknown → neutral gray.
+      const groupIds = getDistinctGroupIds();
+      const gidToColor = new Map();
+      groupIds.forEach((gid, idx) => gidToColor.set(gid, currentAssignment ? currentAssignment[idx] : null));
       const out = [];
       for (let i = 0; i < parts.length; i++) {
-        const c = currentAssignment && currentAssignment[i];
+        const c = gidToColor.get(partGroupId[i]);
         out.push(c ? hexToRGB(c.hex) : NEUTRAL_GRAY);
       }
       return out;
     }
+
+    /* ===================== GROUPING HELPERS ===================== */
+    function getDistinctGroupIds() {
+      const seen = new Set();
+      const out = [];
+      for (const gid of partGroupId) {
+        if (!seen.has(gid)) { seen.add(gid); out.push(gid); }
+      }
+      return out;
+    }
+
+    function getGroupMembers(gid) {
+      const out = [];
+      for (let i = 0; i < partGroupId.length; i++) if (partGroupId[i] === gid) out.push(i);
+      return out;
+    }
+
+    function isPartInMultiGroup(i) {
+      const gid = partGroupId[i];
+      let count = 0;
+      for (const g of partGroupId) if (g === gid) { count++; if (count > 1) return true; }
+      return false;
+    }
+
+    function groupSelected() {
+      if (selectedPartIndices.size < 2) return;
+      const touchedGids = new Set();
+      for (const i of selectedPartIndices) touchedGids.add(partGroupId[i]);
+      if (touchedGids.size < 2) {
+        selectedPartIndices.clear();
+        rerenderAfterGrouping();
+        return;
+      }
+      const newGid = Math.min(...touchedGids);
+      for (let i = 0; i < partGroupId.length; i++) {
+        if (touchedGids.has(partGroupId[i])) partGroupId[i] = newGid;
+      }
+      selectedPartIndices.clear();
+      rerenderAfterGrouping();
+    }
+
+    function ungroupSelected() {
+      if (!selectedPartIndices.size) return;
+      const toDissolve = new Set();
+      for (const i of selectedPartIndices) toDissolve.add(partGroupId[i]);
+      for (let i = 0; i < partGroupId.length; i++) {
+        if (toDissolve.has(partGroupId[i])) partGroupId[i] = i;
+      }
+      selectedPartIndices.clear();
+      rerenderAfterGrouping();
+    }
+
+    function rerenderAfterGrouping() {
+      // Rebuild currentAssignment to match new group count.
+      // Strategy: for each new group, use selectedColors[firstMember.extruder-1] if available,
+      // else selectedColors[0]. (Re-derive from extruders — user picks reset on regroup.)
+      const colorsBackup = selectedColors;
+      const groupIds = getDistinctGroupIds();
+      currentAssignment = groupIds.map(gid => {
+        const firstPartIdx = partGroupId.indexOf(gid);
+        const ext = parts[firstPartIdx]?.extruder;
+        if (ext && colorsBackup[ext - 1]) return colorsBackup[ext - 1];
+        return colorsBackup[0];
+      });
+      regenerateCombinations();
+      renderInfoPanel();
+    }
+
+    function clearPartSelection() {
+      selectedPartIndices.clear();
+      renderInfoPanel();
+    }
+    function togglePartSelection(i, on) {
+      if (on) selectedPartIndices.add(i); else selectedPartIndices.delete(i);
+      renderInfoPanel();
+    }
+    // Expose for inline onclick handlers.
+    window.groupSelected = groupSelected;
+    window.ungroupSelected = ungroupSelected;
+    window.clearPartSelection = clearPartSelection;
+    window.togglePartSelection = togglePartSelection;
 
     /* ===================== CONTROLS ===================== */
     let isDragging = false, lastX = 0, lastY = 0, lastPinch = 0;
@@ -1280,6 +1402,83 @@
       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
+    // Decode HTML entities once (Bambu's Description field is double-encoded; the
+    // outer pass is done by the XML DOMParser via textContent, the inner pass is here).
+    function decodeEntities(s) {
+      const ta = document.createElement('textarea');
+      ta.innerHTML = s;
+      return ta.value;
+    }
+
+    // Allowlist-based HTML sanitizer.
+    function sanitizeHTML(rawHTML) {
+      const ALLOWED_TAGS = new Set([
+        'h1','h2','h3','h4','h5','h6','p','br','hr','strong','em','b','i','u','s',
+        'a','ul','ol','li','blockquote','code','pre',
+        'table','thead','tbody','tfoot','tr','td','th','caption','colgroup','col',
+        'figure','figcaption','span','div','img'
+      ]);
+      const ALLOWED_ATTRS = new Set(['href','src','alt','title','class','style','colspan','rowspan','target','rel']);
+      const STYLE_ALLOWED_PROPS = new Set([
+        'color','background','background-color','text-align','width','height',
+        'margin','padding','border','font-weight','font-style','font-size','line-height',
+        'border-color','border-style','border-width','display'
+      ]);
+      function isSafeURL(url) {
+        const t = url.trim().toLowerCase();
+        return t.startsWith('http://') || t.startsWith('https://') || t.startsWith('mailto:') || t.startsWith('#') || t.startsWith('/') || (!t.includes(':'));
+      }
+      function sanitizeStyle(s) {
+        return s.split(';').map(d => d.trim()).filter(Boolean).filter(decl => {
+          const [prop] = decl.split(':');
+          return prop && STYLE_ALLOWED_PROPS.has(prop.trim().toLowerCase());
+        }).join('; ');
+      }
+      const doc = new DOMParser().parseFromString('<div>' + rawHTML + '</div>', 'text/html');
+      const root = doc.body.firstChild;
+      function walk(node) {
+        const children = [...node.childNodes];
+        for (const child of children) {
+          if (child.nodeType === 1) {
+            const tag = child.tagName.toLowerCase();
+            if (!ALLOWED_TAGS.has(tag)) {
+              walk(child);
+              while (child.firstChild) node.insertBefore(child.firstChild, child);
+              node.removeChild(child);
+              continue;
+            }
+            for (const attr of [...child.attributes]) {
+              const name = attr.name.toLowerCase();
+              if (!ALLOWED_ATTRS.has(name) || name.startsWith('on')) { child.removeAttribute(attr.name); continue; }
+              if ((name === 'href' || name === 'src') && !isSafeURL(attr.value)) { child.removeAttribute(attr.name); continue; }
+              if (name === 'style') {
+                const cleaned = sanitizeStyle(attr.value);
+                if (cleaned) child.setAttribute('style', cleaned); else child.removeAttribute('style');
+              }
+            }
+            if (tag === 'a' && child.hasAttribute('href')) {
+              child.setAttribute('target', '_blank');
+              child.setAttribute('rel', 'noopener noreferrer');
+            }
+            walk(child);
+          }
+        }
+      }
+      walk(root);
+      return root.innerHTML;
+    }
+
+    function looksLikeHTML(s) {
+      return /<\/?[a-zA-Z][^>]*>|&lt;[a-zA-Z]/.test(s);
+    }
+
+    function renderMetaValue(value) {
+      if (looksLikeHTML(value)) {
+        return `<div class="meta-html">${sanitizeHTML(decodeEntities(value))}</div>`;
+      }
+      return esc(value);
+    }
+
     /* ===================== COLOR PALETTE ===================== */
     function renderPalette() {
       paletteEl.innerHTML = '';
@@ -1342,7 +1541,7 @@
     }
 
     /* ===================== COMBINATIONS ===================== */
-    // Enumerate every assignment of `colors` to `parts.length` slots (with replacement).
+    // Enumerate every assignment of `colors` to `partCount` slots (with replacement).
     function enumerateAssignments(colors, partCount) {
       if (!colors.length || !partCount) return [];
       const result = [];
@@ -1378,12 +1577,12 @@
         return;
       }
 
-      const P = parts.length;
+      const P = getDistinctGroupIds().length;
       const K = selectedColors.length;
       const totalCount = Math.pow(K, P);
       const assignments = enumerateAssignments(selectedColors, P);
 
-      comboCountEl.textContent = `${totalCount.toLocaleString()} total (${K} color${K>1?'s':''} × ${P} part${P>1?'s':''})`;
+      comboCountEl.textContent = `${totalCount.toLocaleString()} total (${K} color${K>1?'s':''} × ${P} group${P>1?'s':''})`;
       if (totalCount > MAX_THUMBS) {
         comboMsgEl.hidden = false;
         comboMsgEl.textContent = `Showing first ${MAX_THUMBS} of ${totalCount} combinations. Reduce the number of selected colors to see them all.`;
@@ -1407,12 +1606,22 @@
       renderInfoPanel();
     }
 
+    function expandGroupAssignmentToParts(assignment) {
+      // assignment is per-group (length = distinct group count). Map to per-part RGB.
+      const groupIds = getDistinctGroupIds();
+      const gidToColor = new Map();
+      groupIds.forEach((gid, idx) => gidToColor.set(gid, assignment[idx]));
+      return parts.map((_, i) => {
+        const c = gidToColor.get(partGroupId[i]);
+        return c ? hexToRGB(c.hex) : NEUTRAL_GRAY;
+      });
+    }
+
     function refreshThumbnailsAtCurrentAngle() {
       if (!thumbRenderer || !displayedAssignments.length) return;
-      // Re-render the same set of thumbnails using the new view orientation.
       const imgs = thumbsEl.querySelectorAll('.thumb img');
       for (let i = 0; i < displayedAssignments.length && i < imgs.length; i++) {
-        const colors = displayedAssignments[i].map(c => hexToRGB(c.hex));
+        const colors = expandGroupAssignmentToParts(displayedAssignments[i]);
         thumbRenderer.render(theta, phi, camDist, colors);
         imgs[i].src = thumbCanvas.toDataURL('image/png');
       }
@@ -1424,7 +1633,7 @@
       if (!assignments.length || !thumbRenderer) return;
 
       for (const assignment of assignments) {
-        const colors = assignment.map(c => hexToRGB(c.hex));
+        const colors = expandGroupAssignmentToParts(assignment);
         // Render to offscreen GL canvas, then copy as data URL
         thumbRenderer.render(theta, phi, camDist, colors);
         const dataURL = thumbCanvas.toDataURL('image/png');
@@ -1472,8 +1681,8 @@
     function renderInfoPanel() {
       if (!currentInfo) { infoPanel.innerHTML = ''; return; }
       const { metadata, unit, dims, filename, totalV, totalT, plateName } = currentInfo;
-      const rows = (obj) => Object.entries(obj)
-        .map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td class="v">${esc(v)}</td></tr>`)
+      const rows = (obj, asHTML = false) => Object.entries(obj)
+        .map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td class="v">${asHTML ? renderMetaValue(v) : esc(v)}</td></tr>`)
         .join('');
 
       const geom = {
@@ -1485,24 +1694,34 @@
         [`D (${unit})`]: fmt(dims[2], ''),
       };
 
+      // Build a (groupId → color) lookup for this render.
+      const groupIds = getDistinctGroupIds();
+      const gidToColor = new Map();
+      groupIds.forEach((gid, idx) => gidToColor.set(gid, currentAssignment ? currentAssignment[idx] : null));
+
       // Group parts by parent object for the panel.
-      const groups = new Map();
+      const objectGroups = new Map();
       for (let i = 0; i < parts.length; i++) {
         const key = parts[i].objectName || '—';
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push({ part: parts[i], index: i });
+        if (!objectGroups.has(key)) objectGroups.set(key, []);
+        objectGroups.get(key).push({ part: parts[i], index: i });
       }
-      const partsHTML = [...groups.entries()].map(([objName, items]) =>
+      const partsHTML = [...objectGroups.entries()].map(([objName, items]) =>
         `<details open class="part-group">
            <summary>${esc(objName)} <span class="muted">(${items.length})</span></summary>
            <ul class="part-list">
              ${items.map(({part, index}) => {
-                const c = currentAssignment && currentAssignment[index];
+                const c = gidToColor.get(partGroupId[index]);
                 const colorName = c ? c.name : '— neutral —';
                 const swatch = c
                   ? `<span class="color-dot" style="background:${c.hex}"></span>`
                   : `<span class="color-dot" style="background:repeating-linear-gradient(45deg,#30363d,#30363d 4px,#21262d 4px,#21262d 8px)"></span>`;
-                return `<li>
+                const inMulti = isPartInMultiGroup(index);
+                const inGroupCls = inMulti ? ' in-group' : '';
+                const groupColor = c ? c.hex : '#30363d';
+                const checked = selectedPartIndices.has(index) ? 'checked' : '';
+                return `<li class="${inGroupCls}" style="--group-color:${groupColor}">
+                  <input type="checkbox" ${checked} onchange="togglePartSelection(${index}, this.checked)">
                   <span class="name" title="${esc(part.name)}">${esc(part.name)}</span>
                   <span class="color-name">${swatch}${esc(colorName)}</span>
                 </li>`;
@@ -1511,13 +1730,29 @@
          </details>`
       ).join('');
 
+      // Action bar (visible only when something is selected).
+      let actionBarHTML = '';
+      if (selectedPartIndices.size > 0) {
+        const touchedGids = new Set();
+        for (const i of selectedPartIndices) touchedGids.add(partGroupId[i]);
+        const canGroup = touchedGids.size >= 2;
+        const canUngroup = [...selectedPartIndices].some(i => isPartInMultiGroup(i));
+        actionBarHTML = `
+          <div class="action-bar">
+            <span class="muted">${selectedPartIndices.size} selected</span>
+            <button onclick="groupSelected()" ${canGroup ? '' : 'disabled'}>Group</button>
+            <button onclick="ungroupSelected()" ${canUngroup ? '' : 'disabled'}>Ungroup</button>
+            <button onclick="clearPartSelection()">Clear</button>
+          </div>`;
+      }
+
       const partsHeading = plateName ? `Parts on ${esc(plateName)}` : 'Parts &amp; current colors';
 
       const metaSection = Object.keys(metadata).length ? `
         <hr class="info-divider">
         <div class="info-section">
           <div class="info-section-title">Metadata</div>
-          <table class="info-table">${rows(metadata)}</table>
+          <table class="info-table">${rows(metadata, true)}</table>
         </div>` : '';
 
       infoPanel.innerHTML = `
@@ -1533,6 +1768,7 @@
         <hr class="info-divider">
         <div class="info-section">
           <div class="info-section-title">${partsHeading}</div>
+          ${actionBarHTML}
           ${partsHTML}
         </div>
         ${metaSection}
@@ -1577,33 +1813,53 @@
         plateName: plate.name,
       };
 
+      // Reset grouping state for this plate (each part starts as its own group).
+      partGroupId = parts.map((_, i) => i);
+      selectedPartIndices = new Set();
+
       mainRenderer.uploadParts(parts);
       thumbRenderer.uploadParts(parts);
       theta = 0.4; phi = 0.2; camDist = 4.0;
       if (rafId) cancelAnimationFrame(rafId);
       renderLoop();
 
-      seedColorsFromExtruders();
+      seedColors();
       regenerateCombinations();
     }
 
-    function seedColorsFromExtruders() {
-      let maxExtruder = 0;
-      for (const p of parts) if (p.extruder && p.extruder > maxExtruder) maxExtruder = p.extruder;
-      if (!maxExtruder) {
-        selectedColors = [];
-        currentAssignment = null;
-        renderPalette();
-        renderSelectedStrip();
-        return;
+    // Curated high-contrast subset of BAMBU_PLA for files without filament_colour info.
+    const CONTRAST_DEFAULTS_HEX = ['#000000', '#FFFFFF', '#C12E1F', '#0086D6']; // Black, White, Red, Cyan
+
+    function resolvePaletteEntry(hex) {
+      const upper = hex.toUpperCase();
+      const match = BAMBU_PLA.find(c => c.hex.toUpperCase() === upper);
+      if (match) return match;
+      const r = parseInt(hex.slice(1,3), 16), g = parseInt(hex.slice(3,5), 16), b = parseInt(hex.slice(5,7), 16);
+      const lum = (0.2126*r + 0.7152*g + 0.0722*b) / 255;
+      return { name: upper, hex: upper, light: lum > 0.5 };
+    }
+
+    function seedColors() {
+      const filaments = (scene && scene.filamentColors) || [];
+      let seeds;
+      if (filaments.length) {
+        seeds = filaments.slice(0, MAX_COLORS).map(resolvePaletteEntry);
+      } else {
+        let maxExtruder = 0;
+        for (const p of parts) if (p.extruder && p.extruder > maxExtruder) maxExtruder = p.extruder;
+        const count = maxExtruder ? Math.min(maxExtruder, MAX_COLORS) : MAX_COLORS;
+        seeds = CONTRAST_DEFAULTS_HEX.slice(0, count).map(resolvePaletteEntry);
       }
-      const seedCount = Math.min(maxExtruder, MAX_COLORS);
-      selectedColors = BAMBU_PLA.slice(0, seedCount);
-      currentAssignment = parts.map(p => {
-        if (!p.extruder) return selectedColors[0];
-        const idx = Math.min(p.extruder - 1, selectedColors.length - 1);
-        return selectedColors[idx];
+      selectedColors = seeds;
+
+      const groupIds = getDistinctGroupIds();
+      currentAssignment = groupIds.map(gid => {
+        const firstPartIdx = partGroupId.indexOf(gid);
+        const ext = parts[firstPartIdx]?.extruder;
+        if (!ext) return selectedColors[0];
+        return selectedColors[Math.min(ext - 1, selectedColors.length - 1)];
       });
+
       renderPalette();
       renderSelectedStrip();
     }

@@ -185,6 +185,14 @@
     .part-list li { padding: 0.15rem 0; }
     .muted { opacity: 0.6; }
 
+    .meta-html { line-height: 1.4; font-size: 0.85rem; max-width: 100%; overflow-wrap: anywhere; }
+    .meta-html h1, .meta-html h2, .meta-html h3, .meta-html h4 { margin: 0.5rem 0 0.25rem; line-height: 1.2; }
+    .meta-html p { margin: 0.25rem 0; }
+    .meta-html a { color: #58a6ff; }
+    .meta-html table { border-collapse: collapse; }
+    .meta-html img { max-width: 100%; height: auto; }
+    .meta-html ul, .meta-html ol { padding-left: 1.25rem; margin: 0.25rem 0; }
+
     @media (max-width: 860px) {
       .viewer-layout { flex-direction: column; }
       #canvas { height: 320px; }
@@ -624,6 +632,19 @@
       } catch (e) { console.warn('Failed to parse model_settings.config:', e.message); }
     }
 
+    // Optional Bambu project settings (gives us actual filament colors used in the print).
+    const projectKey = Object.keys(zipFiles).find(k => /metadata\/project_settings\.config$/i.test(k));
+    let filamentColors = [];
+    if (projectKey) {
+      try {
+        const bytes = await inflate(zipFiles[projectKey]);
+        const json = JSON.parse(new TextDecoder().decode(bytes));
+        if (Array.isArray(json.filament_colour)) {
+          filamentColors = json.filament_colour.filter(c => typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c));
+        }
+      } catch (e) { console.warn('Failed to parse project_settings.config:', e.message); }
+    }
+
     // Build one instance per <build><item>.
     const instances = root.buildItems.map((bi) => {
       const leaves = [];
@@ -683,6 +704,7 @@
       filename: '',
       unit: root.unit,
       metadata: root.rootMetadata,
+      filamentColors,
       plates,
     };
   }
@@ -1010,9 +1032,86 @@
         .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
+    // Decode HTML entities once (Bambu's Description field is double-encoded; the
+    // outer pass is done by the XML DOMParser via textContent, the inner pass is here).
+    function decodeEntities(s) {
+      const ta = document.createElement('textarea');
+      ta.innerHTML = s;
+      return ta.value;
+    }
+
+    // Allowlist-based HTML sanitizer.
+    function sanitizeHTML(rawHTML) {
+      const ALLOWED_TAGS = new Set([
+        'h1','h2','h3','h4','h5','h6','p','br','hr','strong','em','b','i','u','s',
+        'a','ul','ol','li','blockquote','code','pre',
+        'table','thead','tbody','tfoot','tr','td','th','caption','colgroup','col',
+        'figure','figcaption','span','div','img'
+      ]);
+      const ALLOWED_ATTRS = new Set(['href','src','alt','title','class','style','colspan','rowspan','target','rel']);
+      const STYLE_ALLOWED_PROPS = new Set([
+        'color','background','background-color','text-align','width','height',
+        'margin','padding','border','font-weight','font-style','font-size','line-height',
+        'border-color','border-style','border-width','display'
+      ]);
+      function isSafeURL(url) {
+        const t = url.trim().toLowerCase();
+        return t.startsWith('http://') || t.startsWith('https://') || t.startsWith('mailto:') || t.startsWith('#') || t.startsWith('/') || (!t.includes(':'));
+      }
+      function sanitizeStyle(s) {
+        return s.split(';').map(d => d.trim()).filter(Boolean).filter(decl => {
+          const [prop] = decl.split(':');
+          return prop && STYLE_ALLOWED_PROPS.has(prop.trim().toLowerCase());
+        }).join('; ');
+      }
+      const doc = new DOMParser().parseFromString('<div>' + rawHTML + '</div>', 'text/html');
+      const root = doc.body.firstChild;
+      function walk(node) {
+        const children = [...node.childNodes];
+        for (const child of children) {
+          if (child.nodeType === 1) {
+            const tag = child.tagName.toLowerCase();
+            if (!ALLOWED_TAGS.has(tag)) {
+              walk(child);
+              while (child.firstChild) node.insertBefore(child.firstChild, child);
+              node.removeChild(child);
+              continue;
+            }
+            for (const attr of [...child.attributes]) {
+              const name = attr.name.toLowerCase();
+              if (!ALLOWED_ATTRS.has(name) || name.startsWith('on')) { child.removeAttribute(attr.name); continue; }
+              if ((name === 'href' || name === 'src') && !isSafeURL(attr.value)) { child.removeAttribute(attr.name); continue; }
+              if (name === 'style') {
+                const cleaned = sanitizeStyle(attr.value);
+                if (cleaned) child.setAttribute('style', cleaned); else child.removeAttribute('style');
+              }
+            }
+            if (tag === 'a' && child.hasAttribute('href')) {
+              child.setAttribute('target', '_blank');
+              child.setAttribute('rel', 'noopener noreferrer');
+            }
+            walk(child);
+          }
+        }
+      }
+      walk(root);
+      return root.innerHTML;
+    }
+
+    function looksLikeHTML(s) {
+      return /<\/?[a-zA-Z][^>]*>|&lt;[a-zA-Z]/.test(s);
+    }
+
+    function renderMetaValue(value) {
+      if (looksLikeHTML(value)) {
+        return `<div class="meta-html">${sanitizeHTML(decodeEntities(value))}</div>`;
+      }
+      return esc(value);
+    }
+
     function renderInfo(metadata, unit, stats, dims, filename, partsForPanel = [], plate = null) {
-      const rows = (obj) => Object.entries(obj)
-        .map(([k,v]) => `<tr><td class="k">${esc(k)}</td><td class="v">${esc(v)}</td></tr>`)
+      const rows = (obj, asHTML = false) => Object.entries(obj)
+        .map(([k,v]) => `<tr><td class="k">${esc(k)}</td><td class="v">${asHTML ? renderMetaValue(v) : esc(v)}</td></tr>`)
         .join('');
 
       const geom = {
@@ -1027,7 +1126,7 @@
         <hr class="info-divider">
         <div class="info-section">
           <div class="info-section-title">Metadata</div>
-          <table class="info-table">${rows(metadata)}</table>
+          <table class="info-table">${rows(metadata, true)}</table>
         </div>` : '';
 
       let partsSection = '';
