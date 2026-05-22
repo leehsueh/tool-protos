@@ -282,6 +282,18 @@
       display: block;
     }
     .instance-combos { margin-bottom: 1.25rem; }
+    .instance-combos > summary {
+      cursor: pointer; list-style: none;
+      padding: 0.4rem 0; border-bottom: 1px solid #21262d;
+      font-size: 0.85rem; font-weight: 600; color: #e6edf3;
+      display: flex; align-items: center; gap: 0.4rem;
+    }
+    .instance-combos > summary::-webkit-details-marker { display: none; }
+    .instance-combos > summary::before {
+      content: '▾'; font-size: 0.7rem; color: #8b949e; transition: transform 0.15s;
+    }
+    .instance-combos:not([open]) > summary::before { transform: rotate(-90deg); }
+    .instance-combos > .thumbs-grid { margin-top: 0.5rem; }
     .instance-combos-heading {
       font-size: 0.85rem;
       font-weight: 600;
@@ -464,13 +476,6 @@
       <div id="color-palette" class="color-palette"></div>
       <div id="selected-strip" class="selected-strip"></div>
 
-      <div class="section-title">
-        Combinations
-        <span class="muted" id="combo-count"></span>
-      </div>
-      <div id="combo-message" class="combo-message" hidden></div>
-      <div id="thumbnails" class="thumbnails"></div>
-
       <div id="saved-section" class="saved-section" hidden>
         <div class="saved-header">
           <span class="saved-title">Saved combos</span>
@@ -478,6 +483,13 @@
         </div>
         <div id="saved-strip" class="saved-strip"></div>
       </div>
+
+      <div class="section-title">
+        Combinations
+        <span class="muted" id="combo-count"></span>
+      </div>
+      <div id="combo-message" class="combo-message" hidden></div>
+      <div id="thumbnails" class="thumbnails"></div>
     </div>
   </main>
 
@@ -1734,9 +1746,10 @@
         totalShown += displayed.length;
         totalAvailable += totalCount;
 
-        const section = document.createElement('div');
+        const section = document.createElement('details');
         section.className = 'instance-combos';
-        const heading = document.createElement('div');
+        section.open = true;
+        const heading = document.createElement('summary');
         heading.className = 'instance-combos-heading';
         heading.innerHTML = `${esc(getInstanceDisplayName(instKey))} <span class="muted">· ${displayed.length} of ${totalCount.toLocaleString()}</span>`;
         section.append(heading);
