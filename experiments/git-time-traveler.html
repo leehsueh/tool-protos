@@ -388,7 +388,7 @@
      Each level: world, name, world#, intro lines, editable knobs,
      actions unlocked, setup(repo), goals[], hints[].
      ============================================================ */
-  const ACT = { edit:'edit', stage:'stage', commit:'commit', travel:'travel', restore:'restore',
+  const ACT = { edit:'edit', stage:'stage', commit:'commit', travel:'travel', discard:'discard',
                 revert:'revert', branch:'branch', switch:'switch', merge:'merge' };
 
   const LEVELS = [
@@ -396,24 +396,28 @@
     {
       n:1, world:1, name:'First Save',
       intro:[
-        "GUIDE: Welcome, Traveler. This little world is your <span class='say'>working directory</span> — what exists *right now*.",
-        "Right now nothing is remembered. If the world changed, it'd be lost forever.",
-        "Let's carve our first <span class='say'>save point</span>. Change the world, place it on the altar (<b>Stage</b>), then stamp a <b>Save Point</b>."
+        "GUIDE: This empty plot is your world — your <span class='say'>working directory</span>. It's already recorded as one starting <span class='say'>save point</span> (see the single dot on the Timeline below).",
+        "Plant something! In the <b>World Editor</b>, set <b>tree → sapling</b>. Watch the <b>Status</b> panel: only <b>tree.txt</b> turns <span class='say'>✎ modified</span> — git tracks exactly what you changed, nothing else.",
+        "Then <b>Stage</b> it (move it to the green '● staged' list) and stamp a new <b>Save Point</b>. Changed your mind before saving? <b>Discard</b> throws unsaved edits away."
       ],
       editable:['tree','flowers'],
-      actions:[ACT.edit,ACT.stage,ACT.commit],
-      setup(r){ r.work={ sky:'day', tree:'sapling', flowers:'none', creature:'none' }; r.index={}; },
+      actions:[ACT.edit,ACT.stage,ACT.commit,ACT.discard],
+      setup(r){
+        const t={ sky:'day', tree:'none', flowers:'none', creature:'none' };
+        const id=makeCommit(r,[],t,'an empty plot'); r.branches.main=id;
+        r.work=clone(t); r.index=clone(t);
+      },
       goals:[
-        { id:'change', label:'Change the world (plant a tree or some flowers)', test:(r,f)=>f.everEdited || f.everCommitted },
-        { id:'stage', label:'Stage your change (place it on the altar)', test:(r,f)=>f.everStaged },
-        { id:'commit', label:'Create your first Save Point', test:(r)=>Object.keys(r.commits).length>=1 },
+        { id:'change', label:'Plant a tree or flowers — only that one file becomes ✎ modified', test:(r,f)=>f.everEdited },
+        { id:'stage', label:'Stage your change (move it to the ● staged list)', test:(r,f)=>f.everStaged },
+        { id:'commit', label:'Make your save point', test:(r)=>Object.keys(r.commits).length>=2 },
       ],
       hints:[
-        "Use the World Editor on the right. Click 'tree' → tree, or 'flowers' → red.",
-        "After changing it, click STAGE to put the change on the altar.",
-        "Then click SAVE POINT and give it a name like 'planted a tree'."
+        "World Editor → tree → sapling. In Status, notice ONLY tree.txt becomes ✎ modified — everything else stays · unchanged.",
+        "Click STAGE and pick tree.txt. It jumps to the green ● staged list = 'will be saved next'.",
+        "Click SAVE POINT and name it. (Try DISCARD too: edit something, then discard to undo it before saving.)"
       ],
-      done:"You made your first commit! That snapshot is now safe forever — the world can change and you can always come back to this exact moment."
+      done:"You made a save point! See how only the file you touched went · unchanged → ✎ modified → ● staged → saved. That before→after flow is the whole heart of git."
     },
     {
       n:2, world:1, name:'The Staging Altar',
@@ -516,7 +520,7 @@
         "Your <b>main</b> timeline stays untouched. (New: you can type real commands in the terminal now!)"
       ],
       editable:['creature','sky'],
-      actions:[ACT.edit,ACT.stage,ACT.commit,ACT.branch,ACT.switch],
+      actions:[ACT.edit,ACT.stage,ACT.commit,ACT.discard,ACT.branch,ACT.switch],
       setup(r){
         const t={sky:'day',tree:'blossom',flowers:'rainbow',creature:'none'};
         const id=makeCommit(r,[],t,'a lovely garden'); r.branches.main=id;
@@ -887,6 +891,9 @@
     if(actionAllowed(ACT.stage)){
       add('&#9650; STAGE','git add', '', openStage, unstaged(G.repo).length>0);
     }
+    if(actionAllowed(ACT.discard)){
+      add('&#10006; DISCARD','git restore','red', openDiscard, unstaged(G.repo).length>0);
+    }
     if(actionAllowed(ACT.commit)){
       add('&#11088; SAVE POINT','git commit','gold', ()=>{ const m=prompt('Name this save point:','my save point'); if(m!==null){ if(doCommit(m)) { toast('Save point created!'); refresh(); } } }, staged(G.repo).length>0);
     }
@@ -928,6 +935,18 @@
       if(v==='__all__'){ doStageAll(); logCmd('git add .'); }
       else { doStageFile(v); logCmd('git add '+(FILE_OF[v]||v)); }
       toast('Staged.'); refresh();
+    });
+  }
+  function doDiscardFile(f){ const h=headTree(G.repo); G.repo.work[f]=h[f]; G.repo.index[f]=h[f]; }
+  function openDiscard(){
+    const u=unstaged(G.repo);
+    if(!u.length){ toast('No unsaved changes to discard.',true); return; }
+    const opts=u.map(k=>({label:(FILE_OF[k]||k)+'  (back to last save: '+headTree(G.repo)[k]+')', value:k}));
+    opts.push({label:'ALL unsaved changes', value:'__all__'});
+    chooser('Discard unsaved changes (cannot be undone):', opts, (v)=>{
+      if(v==='__all__'){ u.forEach(doDiscardFile); logCmd('git restore .', 'discarded all unsaved changes'); }
+      else { doDiscardFile(v); logCmd('git restore '+(FILE_OF[v]||v), 'discarded changes to '+(FILE_OF[v]||v)); }
+      toast('Discarded — back to last save.'); refresh();
     });
   }
   function openTravel(){
@@ -1011,19 +1030,36 @@
   /* ---------- status + goals + win ---------- */
   function renderStatus(){
     const r=G.repo, host=$('#statusFiles'); host.innerHTML='';
-    const st=new Set(staged(r)), un=new Set(unstaged(r));
-    Object.keys(KNOBS).forEach(k=>{
-      const f=FILE_OF[k]; let cls='clean', tag='saved';
-      if(un.has(k)){ cls='mod'; tag='modified'; }
-      else if(st.has(k)){ cls='staged'; tag='staged'; }
-      const d=document.createElement('div'); d.className='f';
-      d.innerHTML='<span>'+f+'</span><span class="'+cls+'">'+tag+' ('+r.work[k]+')</span>';
-      host.appendChild(d);
-    });
+    const h=headTree(r);
     const where = r.HEAD.branch ? ('on timeline: '+r.HEAD.branch) : 'visiting the past (detached)';
-    const w=document.createElement('div'); w.className='f'; w.style.marginTop='.3rem';
-    w.innerHTML='<span style="color:var(--gold)">▶ '+where+'</span>';
+    const w=document.createElement('div'); w.className='f';
+    w.innerHTML='<span style="color:var(--gold)">&#9654; '+where+'</span>';
     host.appendChild(w);
+
+    const stagedF=[], modF=[], cleanF=[];
+    Object.keys(KNOBS).forEach(k=>{
+      const isStaged = r.index[k]!==h[k];   // differs from last save point
+      const isMod    = r.work[k]!==r.index[k]; // working edit not yet staged
+      if(isStaged) stagedF.push(k);
+      if(isMod)    modF.push(k);
+      if(!isStaged && !isMod) cleanF.push(k);
+    });
+
+    function group(title, cls, files, valFn, alwaysShow){
+      if(!files.length && !alwaysShow) return;
+      const head=document.createElement('div');
+      head.className=cls;
+      head.style.cssText='font-size:.64rem;letter-spacing:.5px;margin:.5rem 0 .15rem;font-weight:700;';
+      head.textContent=title;
+      host.appendChild(head);
+      if(!files.length){ const e=document.createElement('div'); e.className='f clean'; e.style.opacity='.45';
+        e.innerHTML='<span>&mdash; nothing yet &mdash;</span><span></span>'; host.appendChild(e); return; }
+      files.forEach(k=>{ const d=document.createElement('div'); d.className='f';
+        d.innerHTML='<span>'+FILE_OF[k]+'</span><span class="'+cls+'">'+valFn(k)+'</span>'; host.appendChild(d); });
+    }
+    group('● STAGED — will be in your next save point', 'staged', stagedF, k=>r.index[k], true);
+    group('✎ MODIFIED — changed, not staged yet',       'mod',    modF,    k=>r.work[k],  true);
+    group('· UNCHANGED — matches last save point',       'clean',  cleanF,  k=>r.work[k],  false);
   }
 
   function renderGoals(){
