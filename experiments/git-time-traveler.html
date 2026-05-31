@@ -171,6 +171,27 @@
 
     .conflict .cf { background:var(--panel2); border:1px solid var(--red); border-radius:3px; padding:.5rem; margin:.5rem 0; }
     .conflict .cf .opt { display:block; width:100%; text-align:left; margin:.3rem 0; }
+
+    /* picker + input overlays (game-native replacements for prompt/confirm) */
+    .modal.sm { max-width:420px; border-color:var(--accent); }
+    .modal.sm h2 { color:var(--accent); }
+    .picker-list { display:flex; flex-direction:column; gap:.4rem; margin:.8rem 0; }
+    .picker-opt {
+      font-family:inherit; font-size:.82rem; cursor:pointer; text-align:left;
+      background:var(--panel2); color:var(--ink); border:2px solid var(--line);
+      border-radius:4px; padding:.55em .7em; box-shadow:0 3px 0 #000; transition:transform .05s;
+    }
+    .picker-opt:hover { border-color:var(--accent); background:#322763; }
+    .picker-opt:active { transform:translateY(3px); box-shadow:none; }
+    .picker-opt .sub { display:block; color:var(--dim); font-size:.68rem; margin-top:2px; }
+    .picker-opt.all { border-color:var(--gold); color:var(--gold); }
+    .picker-opt.warn { border-color:var(--red); }
+    .name-input {
+      width:100%; font-family:inherit; font-size:.85rem; margin:.8rem 0;
+      background:#05040d; color:var(--ink); border:2px solid var(--accent);
+      border-radius:4px; padding:.55em .7em;
+    }
+    .name-input::placeholder { color:var(--line); }
   </style>
 </head>
 <body>
@@ -305,6 +326,26 @@
         </div>
       </div>
     </div>
+
+    <div class="overlay" id="pickerOverlay">
+      <div class="modal sm">
+        <h2 id="pickerTitle">Choose</h2>
+        <p id="pickerSub" style="display:none;"></p>
+        <div class="picker-list" id="pickerList"></div>
+        <div class="center"><button class="btn small" id="pickerCancel">CANCEL</button></div>
+      </div>
+    </div>
+
+    <div class="overlay" id="inputOverlay">
+      <div class="modal sm">
+        <h2 id="inputTitle">Name it</h2>
+        <input class="name-input" id="inputField" autocomplete="off" spellcheck="false">
+        <div class="row" style="justify-content:center;">
+          <button class="btn green" id="inputOk">CONFIRM</button>
+          <button class="btn small" id="inputCancel">CANCEL</button>
+        </div>
+      </div>
+    </div>
   </div>
 
 <script>
@@ -391,21 +432,25 @@
   const ACT = { edit:'edit', stage:'stage', commit:'commit', travel:'travel', discard:'discard',
                 revert:'revert', branch:'branch', switch:'switch', merge:'merge' };
 
+  /* The garden is ONE evolving place. Each level's `enter` is the canonical
+     state of the garden when that level begins (used when you jump in from the
+     menu). When you advance via NEXT, the garden you actually left behind is
+     carried forward in G.saga and used instead, so your choices persist. */
   const LEVELS = [
     /* ---------- WORLD 1 ---------- */
     {
       n:1, world:1, name:'First Save',
+      enter:{ sky:'day', tree:'none', flowers:'none', creature:'none' },
       intro:[
-        "GUIDE: This empty plot is your world — your <span class='say'>working directory</span>. It's already recorded as one starting <span class='say'>save point</span> (see the single dot on the Timeline below).",
+        "GUIDE: Welcome! This empty plot is your garden — your <span class='say'>working directory</span>. It's already recorded as one starting <span class='say'>save point</span> (the single dot on the Timeline).",
         "Plant something! In the <b>World Editor</b>, set <b>tree → sapling</b>. Watch the <b>Status</b> panel: only <b>tree.txt</b> turns <span class='say'>✎ modified</span> — git tracks exactly what you changed, nothing else.",
         "Then <b>Stage</b> it (move it to the green '● staged' list) and stamp a new <b>Save Point</b>. Changed your mind before saving? <b>Discard</b> throws unsaved edits away."
       ],
       editable:['tree','flowers'],
       actions:[ACT.edit,ACT.stage,ACT.commit,ACT.discard],
-      setup(r){
-        const t={ sky:'day', tree:'none', flowers:'none', creature:'none' };
-        const id=makeCommit(r,[],t,'an empty plot'); r.branches.main=id;
-        r.work=clone(t); r.index=clone(t);
+      setup(r, base){
+        const id=makeCommit(r,[],clone(base),'an empty plot'); r.branches.main=id;
+        r.work=clone(base); r.index=clone(base);
       },
       goals:[
         { id:'change', label:'Plant a tree or flowers — only that one file becomes ✎ modified', test:(r,f)=>f.everEdited },
@@ -421,52 +466,55 @@
     },
     {
       n:2, world:1, name:'The Staging Altar',
+      enter:{ sky:'day', tree:'sapling', flowers:'none', creature:'none' },
       intro:[
-        "GUIDE: A save point doesn't have to include *everything* you changed.",
+        "GUIDE: Seasons pass and your sapling is taking root. A save point doesn't have to include <em>everything</em> you change at once.",
         "The <span class='say'>staging altar</span> lets you pick exactly what goes into each save point.",
-        "Two things changed: nice <b>flowers</b>, and an ugly <b>storm</b>. Save ONLY the flowers. Leave the storm unsaved."
+        "Two things changed in your garden: lovely <b>flowers</b>, and an ugly <b>storm</b>. Save ONLY the flowers. Leave the storm unsaved."
       ],
       editable:['sky','flowers'],
-      actions:[ACT.edit,ACT.stage,ACT.commit],
-      setup(r){
-        const t={sky:'day',tree:'tree',flowers:'none',creature:'none'};
-        makeCommit(r,[], t, 'a calm meadow'); r.branches.main=r.seq?('c'+r.seq):null;
-        r.branches.main='c'+r.seq; r.work=clone(t); r.index=clone(t);
-        // pre-dirty: player will set flowers + storm themselves to learn selective staging
+      actions:[ACT.edit,ACT.stage,ACT.commit,ACT.discard],
+      setup(r, base){
+        const start=clone(base); const calmSky=start.sky;
+        const id=makeCommit(r, [], start, 'the garden so far'); r.branches.main=id;
+        r.work=clone(start); r.index=clone(start);
+        // the two pending changes the player must sort out
         r.work.flowers='red'; r.work.sky='storm';
+        G.l2calm=calmSky; // remember the calm sky so goals aren't hardcoded
       },
       goals:[
         { id:'commit', label:'Make a save point that INCLUDES the flowers', test:(r)=>committedHas(r,'flowers','red') },
-        { id:'nostorm', label:'...but does NOT include the storm (sky still calm in the save point)', test:(r)=>committedHas(r,'sky','day') && committedHas(r,'flowers','red') },
-        { id:'stormleft', label:'Leave the storm only in the working world (unsaved)', test:(r)=>r.work.sky==='storm' && committedHas(r,'sky','day') && committedHas(r,'flowers','red') },
+        { id:'nostorm', label:'...but does NOT include the storm (sky stays calm in the save point)', test:(r)=>committedHas(r,'sky',G.l2calm) && committedHas(r,'flowers','red') },
+        { id:'stormleft', label:'Leave the storm only in the working garden (unsaved)', test:(r)=>r.work.sky==='storm' && committedHas(r,'sky',G.l2calm) && committedHas(r,'flowers','red') },
       ],
       hints:[
-        "Click STAGE, then in the popup choose ONLY flowers.txt — not sky.txt.",
+        "Click STAGE, then in the chooser pick ONLY flowers.txt — not sky.txt.",
         "Stage flowers.txt, then SAVE POINT.",
-        "Check Status: sky.txt should still be 'modified' (red) after you commit. That's correct!"
+        "Check Status: sky.txt should still be ✎ modified (red) after you commit. That's correct!"
       ],
-      done:"Perfect. The save point holds the flowers; the storm stays only in your working world. That selective control IS the staging area."
+      done:"Perfect. The save point holds the flowers; the storm stays only in your working garden. That selective control IS the staging area."
     },
     {
       n:3, world:1, name:'Time Travel',
+      enter:{ sky:'day', tree:'tree', flowers:'red', creature:'none' },
       intro:[
-        "GUIDE: Every save point is a moment you can return to. Let me show you.",
-        "Here's a history of moments. Use <b>Time Travel</b> to visit an <span class='say'>older</span> save point — watch the world change to how it was.",
+        "GUIDE: Look how far your garden has come — every step is a save point you can return to.",
+        "This is your garden's own growth history. Use <b>Time Travel</b> to visit an <span class='say'>older</span> moment — watch the garden rewind to how it was.",
         "Then travel back to <span class='say'>NOW</span> (the latest point) so you don't get stranded in the past."
       ],
       editable:[],
       actions:[ACT.travel],
-      setup(r){
-        let p=null; const seq=[
-          ['day','sapling','none','none','a tiny sapling'],
-          ['day','tree','none','none','it grew into a tree'],
-          ['sunset','tree','red','none','red flowers at sunset'],
-          ['night','blossom','rainbow','cat','a magical night'],
+      setup(r, base){
+        // retell the garden's growth, always ending where the player actually is
+        let p=null;
+        const stages=[
+          [{sky:'day',tree:'none',flowers:'none',creature:'none'}, 'an empty plot'],
+          [{sky:'day',tree:'sapling',flowers:'none',creature:'none'}, 'planted a sapling'],
+          [{sky:'day',tree:'tree',flowers:'none',creature:'none'}, 'it grew into a tree'],
+          [clone(base), 'the flowers bloom'],
+          [Object.assign(clone(base),{sky:'sunset'}), 'evening falls on the garden'],
         ];
-        seq.forEach(([sky,tree,flowers,creature,msg])=>{
-          const t={sky,tree,flowers,creature};
-          const id=makeCommit(r, p?[p]:[], t, msg); p=id; r.branches.main=id;
-        });
+        stages.forEach(([t,msg])=>{ p=makeCommit(r, p?[p]:[], t, msg); r.branches.main=p; });
         const h=headTree(r); r.work=clone(h); r.index=clone(h);
       },
       goals:[
@@ -474,39 +522,36 @@
         { id:'now', label:'Return to NOW (the latest save point)', test:(r,f)=>f.visitedPast && r.HEAD.branch==='main' },
       ],
       hints:[
-        "Click TIME TRAVEL and pick an early moment like 'a tiny sapling'. The world rewinds!",
+        "Click TIME TRAVEL and pick an early moment like 'planted a sapling'. The garden rewinds!",
         "Notice the timeline marker moves. Nothing is lost — you're just looking.",
-        "Click TIME TRAVEL again and pick the newest moment (or 'Return to NOW') to come back."
+        "Click TIME TRAVEL again and choose 'Return to NOW' to come back to the present."
       ],
       done:"You just rewound time and came back safely. Commits are permanent snapshots — visiting the past never destroys the future."
     },
     {
       n:4, world:1, name:'The Undo',
+      enter:{ sky:'sunset', tree:'tree', flowers:'red', creature:'none' },
       intro:[
-        "GUIDE: Mistakes happen. Git makes them harmless.",
-        "Someone replaced our lovely scene with a <b>storm</b> and even SAVED it. Yuck.",
-        "Use <b>Revert</b> to create a new save point that undoes the bad one — history stays honest, the storm is gone."
+        "GUIDE: Disaster! A <b>storm</b> rolled over your evening garden — and it got SAVED as a save point. Yuck.",
+        "Use <b>Revert</b> to create a new save point that undoes the bad one — history stays honest, and your garden is restored.",
       ],
       editable:[],
       actions:[ACT.revert,ACT.travel],
-      setup(r){
-        let p=null;
-        [['sunset','tree','red','bird','a peaceful evening'],
-         ['storm','tree','none','none','RUINED: a storm + killed the flowers']]
-        .forEach(([sky,tree,flowers,creature,msg])=>{
-          const t={sky,tree,flowers,creature};
-          p=makeCommit(r, p?[p]:[], t, msg); r.branches.main=p;
-        });
+      setup(r, base){
+        const good=clone(base);
+        const g=makeCommit(r, [], good, 'the garden, thriving'); r.branches.main=g;
+        const storm=Object.assign(clone(base),{sky:'storm',flowers:'none'});
+        const s=makeCommit(r, [g], storm, 'RUINED: a storm killed the flowers'); r.branches.main=s;
         const h=headTree(r); r.work=clone(h); r.index=clone(h);
-        G.badCommit = 'c'+r.seq;
+        G.l4good=good;
       },
       goals:[
-        { id:'revert', label:'Revert the storm: undo it with a new save point', test:(r)=>r.work.sky==='sunset' && r.work.flowers==='red' && Object.keys(r.commits).length>=3 },
+        { id:'revert', label:'Revert the storm: undo it with a new save point', test:(r)=> r.HEAD.branch==='main' && eq(headTree(r), G.l4good) && Object.keys(r.commits).length>=3 },
       ],
       hints:[
-        "Click REVERT and choose the bad save point ('RUINED...').",
+        "Click REVERT and choose the bad save point ('RUINED: a storm...').",
         "Revert makes a NEW save point that cancels the bad one — it doesn't delete history.",
-        "After reverting, the world returns to the peaceful evening and the timeline grows by one."
+        "After reverting, your thriving garden returns and the timeline grows by one."
       ],
       done:"The storm is undone without erasing the past. 'Revert' is the safe undo: it adds a save point that reverses a previous one."
     },
@@ -514,17 +559,17 @@
     /* ---------- WORLD 2 ---------- */
     {
       n:5, world:2, name:'A New Timeline', termHint:true,
+      enter:{ sky:'sunset', tree:'tree', flowers:'red', creature:'none' },
       intro:[
-        "GUIDE: Want to try something risky without ruining your good work? Make a <span class='say'>branch</span> — a parallel timeline.",
-        "Create a branch called <b>experiment</b>, switch to it, add a wild <b>dragon</b>, and save it there.",
-        "Your <b>main</b> timeline stays untouched. (New: you can type real commands in the terminal now!)"
+        "GUIDE: Your garden is beautiful. Want to try something wild without risking it? Make a <span class='say'>branch</span> — a parallel timeline.",
+        "Create a branch called <b>experiment</b>, switch to it, add a <b>dragon</b>, and save it there.",
+        "Your <b>main</b> garden stays untouched. (New: you can type real commands in the terminal now!)"
       ],
       editable:['creature','sky'],
       actions:[ACT.edit,ACT.stage,ACT.commit,ACT.discard,ACT.branch,ACT.switch],
-      setup(r){
-        const t={sky:'day',tree:'blossom',flowers:'rainbow',creature:'none'};
-        const id=makeCommit(r,[],t,'a lovely garden'); r.branches.main=id;
-        r.work=clone(t); r.index=clone(t);
+      setup(r, base){
+        const id=makeCommit(r,[],clone(base),'our beautiful garden'); r.branches.main=id;
+        r.work=clone(base); r.index=clone(base);
       },
       goals:[
         { id:'branch', label:"Create a branch named 'experiment'", test:(r)=>'experiment' in r.branches },
@@ -534,24 +579,24 @@
       ],
       hints:[
         "Click BRANCH, name it 'experiment'. Or type: git branch experiment",
-        "Click SWITCH → experiment (or: git switch experiment). The world is yours to experiment with.",
+        "Click SWITCH → experiment (or: git switch experiment). The garden here is yours to experiment with.",
         "Set pet → dragon, STAGE, SAVE POINT. Notice main never changed."
       ],
       done:"Two timelines now exist. Branches are cheap, safe sandboxes — the heart of how real teams work."
     },
     {
       n:6, world:2, name:'Fuse the Timelines', termHint:true,
+      enter:{ sky:'sunset', tree:'tree', flowers:'red', creature:'none' },
       intro:[
-        "GUIDE: Your experiment worked! Time to bring it home.",
-        "The <b>experiment</b> timeline added a dragon. Switch to <b>main</b> and <b>Merge</b> experiment in.",
-        "The changes don't clash, so they combine cleanly."
+        "GUIDE: Your experiment worked — the dragon is wonderful! Time to bring it home.",
+        "The <b>experiment</b> timeline added a dragon to your garden. Switch to <b>main</b> and <b>Merge</b> experiment in.",
+        "Your gardens changed different things, so they combine cleanly."
       ],
       editable:[],
       actions:[ACT.switch,ACT.merge,ACT.travel],
-      setup(r){
-        const base={sky:'sunset',tree:'tree',flowers:'red',creature:'none'};
-        const m=makeCommit(r,[],base,'evening garden'); r.branches.main=m;
-        const ex={sky:'sunset',tree:'tree',flowers:'red',creature:'dragon'};
+      setup(r, base){
+        const m=makeCommit(r,[],clone(base),'our beautiful garden'); r.branches.main=m;
+        const ex=Object.assign(clone(base),{creature:'dragon'});
         const e=makeCommit(r,[m],ex,'added a dragon'); r.branches.experiment=e;
         r.HEAD={branch:'main'}; const h=headTree(r); r.work=clone(h); r.index=clone(h);
       },
@@ -562,26 +607,27 @@
       hints:[
         "Click SWITCH → main first (or: git switch main).",
         "Click MERGE → experiment (or: git merge experiment).",
-        "The dragon now lives on main. Clean merge — no clashes!"
+        "The dragon now lives in your main garden. Clean merge — no clashes!"
       ],
       done:"Merged! When two timelines change different things, git fuses them automatically. Collaboration in a nutshell."
     },
     {
       n:7, world:2, name:'The Paradox', termHint:true,
+      enter:{ sky:'sunset', tree:'tree', flowers:'red', creature:'dragon' },
       intro:[
-        "GUIDE: The final trial. Two timelines changed the SAME thing differently.",
-        "<b>main</b> made the sky a <b>sunset</b>; <b>nightcrew</b> made it <b>night</b>. Git can't guess — this is a <span class='say'>merge conflict</span> (a time paradox).",
+        "GUIDE: The final trial. You and a friend (the <b>nightcrew</b>) both reworked the same garden, and you both changed the <em>sky</em>.",
+        "Your <b>main</b> garden keeps the <b>sunset</b>; <b>nightcrew</b> made it <b>night</b>. Git can't guess — this is a <span class='say'>merge conflict</span> (a time paradox).",
         "Merge <b>nightcrew</b> into main, then YOU choose how to resolve the clash."
       ],
       editable:[],
       actions:[ACT.switch,ACT.merge,ACT.travel],
-      setup(r){
-        const base={sky:'day',tree:'tree',flowers:'none',creature:'none'};
-        const b=makeCommit(r,[],base,'a plain day'); r.branches.main=b;
-        const mainT={sky:'sunset',tree:'tree',flowers:'red',creature:'none'};
-        const m=makeCommit(r,[b],mainT,'main: sunset + red flowers'); r.branches.main=m;
-        const nightT={sky:'night',tree:'tree',flowers:'none',creature:'cat'};
-        const nc=makeCommit(r,[b],nightT,'nightcrew: night + a cat'); r.branches.nightcrew=nc;
+      setup(r, base){
+        const start=Object.assign(clone(base),{sky:'day',flowers:'none'});
+        const b=makeCommit(r,[],start,'the shared garden'); r.branches.main=b;
+        const mainT=Object.assign(clone(start),{sky:'sunset',flowers:'red'});
+        const m=makeCommit(r,[b],mainT,'main: a red-flowered sunset'); r.branches.main=m;
+        const nightT=Object.assign(clone(start),{sky:'night'});
+        const nc=makeCommit(r,[b],nightT,'nightcrew: a starry night'); r.branches.nightcrew=nc;
         r.HEAD={branch:'main'}; const h=headTree(r); r.work=clone(h); r.index=clone(h);
       },
       goals:[
@@ -589,7 +635,7 @@
       ],
       hints:[
         "Make sure you're on main (SWITCH → main), then MERGE → nightcrew.",
-        "A paradox popup appears for sky (sunset vs night). Pick the version you want.",
+        "A paradox popup appears for sky (sunset vs night). The flowers merge automatically — only the sky truly clashes. Pick the sky you want.",
         "Choosing a side and sealing it creates a special merge save point with TWO parents."
       ],
       done:"You resolved a real merge conflict — the thing that scares most beginners. You are now git-fluent. The shared-world (remote/teamwork) worlds await in a future update!"
@@ -839,13 +885,14 @@
     });
   }
 
-  function startLevel(n){
+  function startLevel(n, carried){
     G.level=n; G.flags={}; G.hintIdx=0; G.pendingConflict=null;
     const L=LEVELS[n-1];
     G.repo=newRepo();
-    L.setup(G.repo);
-    // ensure HEAD on main if commits exist
-    if(!G.repo.branches.main && Object.keys(G.repo.commits).length){ /* setup handles */ }
+    // continuity: the garden begins from where you left the previous level
+    // (carried), or from this level's canonical entry state if jumped into.
+    const base = carried ? clone(carried) : clone(L.enter);
+    L.setup(G.repo, base);
     $('#cmdLog').innerHTML='';
     $('#gameTitle').textContent='LVL '+n+' — '+L.name;
     // quest text
@@ -895,7 +942,7 @@
       add('&#10006; DISCARD','git restore','red', openDiscard, unstaged(G.repo).length>0);
     }
     if(actionAllowed(ACT.commit)){
-      add('&#11088; SAVE POINT','git commit','gold', ()=>{ const m=prompt('Name this save point:','my save point'); if(m!==null){ if(doCommit(m)) { toast('Save point created!'); refresh(); } } }, staged(G.repo).length>0);
+      add('&#11088; SAVE POINT','git commit','gold', ()=>{ gameInput('Name this save point','e.g. planted a tree','', m=>{ if(doCommit(m)){ toast('Save point created!'); refresh(); } }); }, staged(G.repo).length>0);
     }
     if(actionAllowed(ACT.travel)){
       add('&#9203; TIME TRAVEL','git checkout','', openTravel, true);
@@ -904,7 +951,7 @@
       add('&#8634; REVERT','git revert','red', openRevert, true);
     }
     if(actionAllowed(ACT.branch)){
-      add('&#8638; BRANCH','git branch','', ()=>{ const n=prompt('Name the new timeline:','experiment'); if(n){ doBranch(n.trim()); refresh(); } }, true);
+      add('&#8638; BRANCH','git branch','', ()=>{ gameInput('Name the new timeline','e.g. experiment','experiment', n=>{ doBranch(n); refresh(); }); }, true);
     }
     if(actionAllowed(ACT.switch)){
       add('&#8644; SWITCH','git switch','', openSwitch, true);
@@ -914,60 +961,81 @@
     }
   }
 
-  /* small pop choosers reuse the conflict overlay-ish prompt via window.prompt for simplicity,
-     but stage/travel/switch/merge use a lightweight inline menu */
-  function chooser(title, options, onPick){
-    // options: [{label, value}]
-    const lines = options.map((o,i)=>(i+1)+') '+o.label).join('\n');
-    const ans = prompt(title+'\n'+lines+'\n\nType a number:');
-    if(ans===null) return;
-    const idx=parseInt(ans,10)-1;
-    if(options[idx]) onPick(options[idx].value);
-    else toast('Cancelled.');
+  /* game-native picker overlay (replaces window.prompt menus) */
+  function chooser(title, options, onPick, sub){
+    // options: [{label, value, sub?, cls?}]
+    $('#pickerTitle').textContent=title;
+    const subEl=$('#pickerSub');
+    if(sub){ subEl.textContent=sub; subEl.style.display='block'; } else { subEl.style.display='none'; }
+    const list=$('#pickerList'); list.innerHTML='';
+    options.forEach(o=>{
+      const b=document.createElement('button');
+      b.className='picker-opt'+(o.cls?(' '+o.cls):'');
+      b.innerHTML=o.label+(o.sub?('<span class="sub">'+o.sub+'</span>'):'');
+      b.onclick=()=>{ $('#pickerOverlay').classList.remove('show'); onPick(o.value); };
+      list.appendChild(b);
+    });
+    $('#pickerOverlay').classList.add('show');
+  }
+  $('#pickerCancel').onclick=()=>$('#pickerOverlay').classList.remove('show');
+
+  /* game-native text input overlay (replaces window.prompt) */
+  function gameInput(title, placeholder, def, onOk){
+    $('#inputTitle').textContent=title;
+    const f=$('#inputField'); f.placeholder=placeholder||''; f.value=def||'';
+    $('#inputOverlay').classList.add('show');
+    setTimeout(()=>f.focus(),30);
+    const ok=()=>{ const v=f.value.trim(); close(); if(v) onOk(v); };
+    const close=()=>{ $('#inputOverlay').classList.remove('show'); $('#inputOk').onclick=null; f.onkeydown=null; };
+    $('#inputOk').onclick=ok;
+    $('#inputCancel').onclick=close;
+    f.onkeydown=e=>{ if(e.key==='Enter') ok(); else if(e.key==='Escape') close(); };
   }
 
   function openStage(){
     const u=unstaged(G.repo);
     if(!u.length){ toast('Nothing changed to stage.',true); return; }
-    const opts=u.map(k=>({label:(FILE_OF[k]||k)+'  ('+G.repo.work[k]+')', value:k}));
-    opts.push({label:'ALL of the above', value:'__all__'});
-    chooser('Place on the altar (stage):', opts, (v)=>{
+    const opts=u.map(k=>({label:FILE_OF[k]||k, sub:'now: '+G.repo.work[k], value:k}));
+    if(u.length>1) opts.push({label:'⊕ Stage ALL changes', value:'__all__', cls:'all'});
+    chooser('Place on the altar (stage)', opts, (v)=>{
       if(v==='__all__'){ doStageAll(); logCmd('git add .'); }
       else { doStageFile(v); logCmd('git add '+(FILE_OF[v]||v)); }
       toast('Staged.'); refresh();
-    });
+    }, 'Staged files go into your next save point.');
   }
   function doDiscardFile(f){ const h=headTree(G.repo); G.repo.work[f]=h[f]; G.repo.index[f]=h[f]; }
   function openDiscard(){
     const u=unstaged(G.repo);
     if(!u.length){ toast('No unsaved changes to discard.',true); return; }
-    const opts=u.map(k=>({label:(FILE_OF[k]||k)+'  (back to last save: '+headTree(G.repo)[k]+')', value:k}));
-    opts.push({label:'ALL unsaved changes', value:'__all__'});
-    chooser('Discard unsaved changes (cannot be undone):', opts, (v)=>{
+    const opts=u.map(k=>({label:FILE_OF[k]||k, sub:G.repo.work[k]+' → back to '+headTree(G.repo)[k], value:k, cls:'warn'}));
+    if(u.length>1) opts.push({label:'✕ Discard ALL unsaved changes', value:'__all__', cls:'warn'});
+    chooser('Discard unsaved changes', opts, (v)=>{
       if(v==='__all__'){ u.forEach(doDiscardFile); logCmd('git restore .', 'discarded all unsaved changes'); }
       else { doDiscardFile(v); logCmd('git restore '+(FILE_OF[v]||v), 'discarded changes to '+(FILE_OF[v]||v)); }
       toast('Discarded — back to last save.'); refresh();
-    });
+    }, 'This throws the change away. It cannot be undone.');
   }
   function openTravel(){
-    const r=G.repo; const ids=Object.keys(r.commits).sort((a,b)=>r.commits[a].n-r.commits[b].n);
-    const opts=ids.map(id=>({label:id+' — '+r.commits[id].message, value:id}));
-    opts.push({label:'⏭ Return to NOW (latest)', value:'__now__'});
-    chooser('Travel to which moment?', opts, (v)=>{ if(v==='__now__') doReturnNow(); else doTravelTo(v); toast('Time shift!'); refresh(); });
+    const r=G.repo; const ids=Object.keys(r.commits).sort((a,b)=>r.commits[b].n-r.commits[a].n);
+    const cur=headCommitId(r);
+    const opts=ids.map(id=>({label:r.commits[id].message, sub:id+(id===cur?'  •  you are here':''), value:id}));
+    opts.unshift({label:'⏭ Return to NOW (latest)', value:'__now__', cls:'all'});
+    chooser('Travel to which moment?', opts, (v)=>{ if(v==='__now__') doReturnNow(); else doTravelTo(v); toast('Time shift!'); refresh(); }, 'Visiting the past never destroys anything.');
   }
   function openRevert(){
     const r=G.repo; const ids=Object.keys(r.commits).filter(id=>r.commits[id].parents.length===1).sort((a,b)=>r.commits[b].n-r.commits[a].n);
-    const opts=ids.map(id=>({label:id+' — '+r.commits[id].message, value:id}));
-    chooser('Undo which save point?', opts, (v)=>{ doRevert(v); refresh(); });
+    const opts=ids.map(id=>({label:r.commits[id].message, sub:id, value:id}));
+    chooser('Undo which save point?', opts, (v)=>{ doRevert(v); refresh(); }, 'Revert adds a NEW save point that cancels the chosen one.');
   }
   function openSwitch(){
-    const r=G.repo; const opts=Object.keys(r.branches).map(b=>({label:b, value:b}));
+    const r=G.repo; const cur=r.HEAD.branch;
+    const opts=Object.keys(r.branches).map(b=>({label:b+(b===cur?'  •  current':''), sub:'tip: '+(r.commits[r.branches[b]]||{}).message, value:b, cls:b===cur?'all':''}));
     chooser('Switch to which timeline?', opts, (v)=>{ doSwitch(v); refresh(); });
   }
   function openMerge(){
-    const r=G.repo; const opts=Object.keys(r.branches).filter(b=>b!==r.HEAD.branch).map(b=>({label:b, value:b}));
+    const r=G.repo; const opts=Object.keys(r.branches).filter(b=>b!==r.HEAD.branch).map(b=>({label:b, sub:'tip: '+(r.commits[r.branches[b]]||{}).message, value:b}));
     if(!opts.length){ toast('No other timeline to merge.',true); return; }
-    chooser('Merge which timeline into '+(r.HEAD.branch||'?')+'?', opts, (v)=>{ doMerge(v); refresh(); });
+    chooser('Merge which timeline into '+(r.HEAD.branch||'?')+'?', opts, (v)=>{ doMerge(v); refresh(); }, 'Brings that timeline’s changes into your current one.');
   }
 
   /* conflict overlay */
@@ -1088,6 +1156,10 @@
 
   function onWin(){
     const L=LEVELS[G.level-1];
+    // continuity: remember the garden as it stands on the main timeline so the
+    // next level can pick up exactly where this one left off.
+    const r=G.repo;
+    G.saga = r.branches.main ? clone(r.commits[r.branches.main].tree) : clone(r.work);
     // stars: 3 if no hint used, 2 if 1 hint, else 1
     const stars = G.hintIdx===0?3 : (G.hintIdx<=1?2:1);
     G.progress.stars[L.n]=Math.max(G.progress.stars[L.n]||0, stars);
@@ -1122,7 +1194,7 @@
   $('#backTitle').onclick=()=>show('screen-title');
   $('#toLevels').onclick=()=>{ renderLevels(); show('screen-levels'); };
   $('#winLevels').onclick=()=>{ $('#winOverlay').classList.remove('show'); renderLevels(); show('screen-levels'); };
-  $('#nextBtn').onclick=()=>{ $('#winOverlay').classList.remove('show'); if(G.level<LEVELS.length) startLevel(G.level+1); };
+  $('#nextBtn').onclick=()=>{ $('#winOverlay').classList.remove('show'); if(G.level<LEVELS.length) startLevel(G.level+1, G.saga); };
   $('#resetBtn').onclick=()=>startLevel(G.level);
   $('#hintBtn').onclick=()=>{ const L=LEVELS[G.level-1]; const h=L.hints[Math.min(G.hintIdx,L.hints.length-1)]; toast('HINT: '+h); G.hintIdx++; };
   $('#glosBtn1').onclick=openGlossary; $('#glosBtn2').onclick=openGlossary; $('#glosClose').onclick=()=>$('#glosOverlay').classList.remove('show');
