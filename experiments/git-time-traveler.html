@@ -866,7 +866,7 @@
     ctx.font='bold '+fontStack; ctx.textBaseline='middle';
     bnames.forEach(bn=>{ const id=r.branches[bn]; if(!id||!pos[id])return; const {x,y}=pos[id];
       const here=r.HEAD.branch===bn;
-      const lbl=(here?'▶ ':'')+bn;
+      const lbl=(here?'HEAD ▶ ':'')+bn;
       const lx=x+14;
       ctx.fillStyle=branchColors[bn]||'#8df8ff';
       ctx.fillText(lbl, lx, y);
@@ -884,7 +884,7 @@
     });
     // detached HEAD marker
     if(!r.HEAD.branch && pos[r.HEAD.detached]){ const {x,y}=pos[r.HEAD.detached];
-      ctx.fillStyle='#ffd866'; ctx.fillText('▶ you are here (past)', x+14, y);
+      ctx.fillStyle='#ffd866'; ctx.fillText('HEAD ▶ here (past)', x+14, y);
     }
     ctx.textBaseline='alphabetic';
   }
@@ -1184,6 +1184,7 @@
 
   function startLevel(n, carried){
     G.level=n; G.flags={}; G.hintIdx=0; G.pendingConflict=null;
+    clearTimeout(G._winTimer); $('#winOverlay').classList.remove('show');
     const L=LEVELS[n-1];
     G.repo=newRepo();
     // continuity: the garden begins from where you left the previous level
@@ -1490,7 +1491,12 @@
     $('#winTitle').textContent = L.n===LEVELS.length?'YOU ARE GIT-FLUENT!':'TIMELINE SECURED!';
     $('#winMsg').innerHTML=L.done;
     $('#nextBtn').style.display = (L.n<LEVELS.length)?'inline-block':'none';
-    $('#winOverlay').classList.add('show');
+    // Don't slam the win screen up instantly — the player just changed the
+    // timeline (a new save point, HEAD jumping to it). Let them SEE that on the
+    // Timeline first, point at it, then reveal the win screen.
+    toast('✓ Goal complete! See the new save point &amp; where HEAD moved on the Timeline…');
+    clearTimeout(G._winTimer);
+    G._winTimer=setTimeout(()=>{ $('#winOverlay').classList.add('show'); }, 1800);
   }
 
   /* ---------- glossary ---------- */
