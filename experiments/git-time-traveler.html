@@ -11,9 +11,9 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:#0d0b1a; --panel:#1a1530; --panel2:#241c45; --ink:#e8e6ff;
-      --dim:#9a93c9; --accent:#7cf5ff; --gold:#ffd866; --green:#7cff9b;
-      --red:#ff6b8b; --blue:#74a8ff; --line:#3a2f63;
+      --bg:#0d0b1a; --panel:#1a1530; --panel2:#241c45; --ink:#f2f0ff;
+      --dim:#c5bff0; --accent:#8df8ff; --gold:#ffd866; --green:#86ffa3;
+      --red:#ff8197; --blue:#8fb6ff; --line:#3a2f63;
     }
 
     @font-face {
@@ -119,9 +119,10 @@
     }
     .panel h3 { font-size:.78rem; color: var(--dim); letter-spacing:1px; margin-bottom:.4rem; text-transform:uppercase; }
 
-    canvas { display:block; image-rendering:pixelated; width:100%; background:#000; border:2px solid var(--line); border-radius:3px; }
-    #sceneCanvas { aspect-ratio: 16/10; }
-    #graphCanvas { aspect-ratio: 16/7; }
+    canvas { display:block; width:100%; background:#000; border:2px solid var(--line); border-radius:3px; }
+    /* scene art stays chunky-pixel; the timeline graph renders sharp (it has text) */
+    #sceneCanvas { aspect-ratio: 16/10; image-rendering:pixelated; }
+    #graphCanvas { aspect-ratio: 16/7; image-rendering:auto; }
 
     .quest { line-height:1.65; font-size:.95rem; }
     .quest .say { color: var(--accent); }
@@ -143,9 +144,9 @@
     .act { display:flex; flex-direction:column; align-items:center; }
     .act small { color: var(--dim); font-size:.68rem; margin-top:3px; letter-spacing:.5px; }
 
-    .status-files .f { font-size:.85rem; display:flex; justify-content:space-between; padding:.16rem 0; gap:.5rem; }
-    .status-files .staged { color: var(--green); }
-    .status-files .mod { color: var(--red); }
+    .status-files .f { font-size:.9rem; display:flex; justify-content:space-between; padding:.2rem 0; gap:.5rem; color: var(--ink); }
+    .status-files .staged { color: var(--green); font-weight:700; }
+    .status-files .mod { color: var(--red); font-weight:700; }
     .status-files .clean { color: var(--dim); }
 
     .cmdlog { background:#05040d; border:2px solid var(--line); border-radius:3px; padding:.5rem; height:130px; overflow:auto; font-size:.82rem; line-height:1.55; }
@@ -698,22 +699,31 @@
 
   function drawGraph(canvas, r){
     const ctx=canvas.getContext('2d');
-    const W=320,H=140; canvas.width=W; canvas.height=H;
+    // Render at the canvas's real displayed size (x devicePixelRatio) so text
+    // stays sharp instead of being a tiny bitmap stretched up & pixelated.
+    const dpr=window.devicePixelRatio||1;
+    const cssW=canvas.clientWidth||520, cssH=canvas.clientHeight||Math.round(cssW*7/16);
+    const W=Math.round(cssW), H=Math.round(cssH);
+    canvas.width=W*dpr; canvas.height=H*dpr;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.imageSmoothingEnabled=true;
     px(ctx,0,0,W,H,'#05040d');
     const ids=Object.keys(r.commits);
-    if(!ids.length){ ctx.fillStyle='#9a93c9'; ctx.font='10px monospace'; ctx.fillText('no save points yet — make one!',12,72); return; }
+    const fontStack='14px "Courier New", monospace';
+    if(!ids.length){ ctx.fillStyle='#c5bff0'; ctx.font=fontStack; ctx.fillText('no save points yet — make one!',14,H/2); return; }
     // assign rows by branch lineage
-    const branchColors={main:'#7cf5ff',experiment:'#ff8fc7',nightcrew:'#c45bff'};
-    const palette=['#7cf5ff','#ff8fc7','#c45bff','#ffd166','#7cff9b'];
-    // row per branch tip lineage: walk each branch, assign row index
+    const branchColors={main:'#8df8ff',experiment:'#ff9ed2',nightcrew:'#cf86ff'};
+    const palette=['#8df8ff','#ff9ed2','#cf86ff','#ffd866','#86ffa3'];
     const rowOf={}; const bnames=Object.keys(r.branches); let ri=0;
     const memo={};
     bnames.forEach(bn=>{ rowOf[bn]=ri++; });
     const colOf={}; ids.forEach(id=>{ colOf[id]=generation(r,id,memo); });
     const maxCol=Math.max(...ids.map(id=>colOf[id]),0);
-    const x0=26, dx=Math.min(60,(W-50)/(maxCol+1));
-    const y0=30, dy=34;
-    // which branch row a commit belongs to: nearest branch whose ancestor set contains it, prefer tip
+    const maxRow=Math.max(ri-1,0);
+    const padL=34, padR=110, padT=26;
+    const dx=Math.min(78,(W-padL-padR)/Math.max(maxCol,1));
+    const dy=Math.min(46,(H-padT*2)/Math.max(maxRow,1)||40);
+    const x0=padL, y0=padT;
     function commitRow(id){
       let best=0, bestg=-1;
       bnames.forEach(bn=>{ if(ancestors(r,r.branches[bn]).has(id)){ const g=generation(r,r.branches[bn],memo); if(g>=bestg){bestg=g;best=rowOf[bn];} } });
@@ -722,31 +732,34 @@
     const pos={};
     ids.forEach(id=>{ pos[id]={ x:x0+colOf[id]*dx, y:y0+commitRow(id)*dy }; });
     // edges
-    ctx.lineWidth=2;
+    ctx.lineWidth=2.5;
     ids.forEach(id=>{ r.commits[id].parents.forEach(p=>{ if(!pos[p])return;
-      ctx.strokeStyle='#3a2f63'; ctx.beginPath(); ctx.moveTo(pos[p].x,pos[p].y); ctx.lineTo(pos[id].x,pos[id].y); ctx.stroke();
+      ctx.strokeStyle='#4d3f80'; ctx.beginPath(); ctx.moveTo(pos[p].x,pos[p].y); ctx.lineTo(pos[id].x,pos[id].y); ctx.stroke();
     }); });
-    // nodes
+    // nodes (drawn as smooth-edged squares with a dark outline)
     const hcid=headCommitId(r);
     ids.forEach(id=>{ const {x,y}=pos[id];
       const merge=r.commits[id].parents.length>1;
-      let col=palette[commitRow(id)%palette.length];
-      px(ctx,x-7,y-7,14,14,'#000');
-      px(ctx,x-5,y-5,10,10,col);
-      if(merge){ px(ctx,x-2,y-2,4,4,'#000'); }
-      if(id===hcid){ ctx.strokeStyle='#ffd166'; ctx.lineWidth=2; ctx.strokeRect(x-9,y-9,18,18); }
+      const col=palette[commitRow(id)%palette.length];
+      ctx.fillStyle='#000'; ctx.fillRect(x-9,y-9,18,18);
+      ctx.fillStyle=col;    ctx.fillRect(x-6,y-6,12,12);
+      if(merge){ ctx.fillStyle='#000'; ctx.fillRect(x-2,y-2,4,4); }
+      if(id===hcid){ ctx.strokeStyle='#ffd866'; ctx.lineWidth=2.5; ctx.strokeRect(x-11,y-11,22,22); }
     });
-    // branch labels at tips
-    ctx.font='9px monospace';
+    // branch labels at tips — larger, sharp, with a readable backing
+    ctx.font='bold '+fontStack; ctx.textBaseline='middle';
     bnames.forEach(bn=>{ const id=r.branches[bn]; if(!id||!pos[id])return; const {x,y}=pos[id];
-      const lbl=(r.HEAD.branch===bn?'▶':'')+bn;
-      ctx.fillStyle=branchColors[bn]||'#7cf5ff';
-      ctx.fillText(lbl, x+10, y+3);
+      const here=r.HEAD.branch===bn;
+      const lbl=(here?'▶ ':'')+bn;
+      const lx=x+14;
+      ctx.fillStyle=branchColors[bn]||'#8df8ff';
+      ctx.fillText(lbl, lx, y);
     });
     // detached HEAD marker
     if(!r.HEAD.branch && pos[r.HEAD.detached]){ const {x,y}=pos[r.HEAD.detached];
-      ctx.fillStyle='#ffd166'; ctx.fillText('▶ you are here (past)', x-4, y-12);
+      ctx.fillStyle='#ffd866'; ctx.fillText('▶ you are here (past)', x+14, y);
     }
+    ctx.textBaseline='alphabetic';
   }
 
   function drawTitle(){
@@ -1125,7 +1138,7 @@
       head.style.cssText='font-size:.74rem;letter-spacing:.5px;margin:.55rem 0 .2rem;font-weight:700;';
       head.textContent=title;
       host.appendChild(head);
-      if(!files.length){ const e=document.createElement('div'); e.className='f clean'; e.style.opacity='.45';
+      if(!files.length){ const e=document.createElement('div'); e.className='f clean'; e.style.opacity='.7'; e.style.fontStyle='italic';
         e.innerHTML='<span>&mdash; nothing yet &mdash;</span><span></span>'; host.appendChild(e); return; }
       files.forEach(k=>{ const d=document.createElement('div'); d.className='f';
         d.innerHTML='<span>'+FILE_OF[k]+'</span><span class="'+cls+'">'+valFn(k)+'</span>'; host.appendChild(d); });
