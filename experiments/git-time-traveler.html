@@ -1,0 +1,1543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="An 8-bit pixel adventure that teaches git to non-technical people by treating it as time travel across parallel timelines — 3 worlds, 10 levels, from your first save point to remote teamwork (push/pull).">
+  <meta name="date" content="2026-05-30">
+  <meta name="tags" content="game, git, education, pixel-art, canvas">
+  <title>Git Time Traveler</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:#0d0b1a; --panel:#1a1530; --panel2:#241c45; --ink:#f2f0ff;
+      --dim:#c5bff0; --accent:#8df8ff; --gold:#ffd866; --green:#86ffa3;
+      --red:#ff8197; --blue:#8fb6ff; --line:#3a2f63;
+    }
+
+    @font-face {
+      font-family: 'pixel';
+      src: local('Courier New');
+    }
+
+    body {
+      font-family: 'Courier New', monospace;
+      background: var(--bg);
+      color: var(--ink);
+      min-height: 100vh;
+      padding: 1rem;
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+    }
+    /* keep the art crisp-pixel; text stays smooth/readable */
+    canvas { image-rendering: pixelated; }
+
+    nav { margin-bottom: 1rem; }
+    nav a { color: var(--accent); text-decoration: none; font-size: 0.8rem; }
+    nav a:hover { text-decoration: underline; }
+
+    /* ---- Docs ---- */
+    details {
+      background: var(--panel); border: 2px solid var(--line);
+      border-radius: 4px; padding: 1rem 1.25rem; margin-bottom: 1.25rem; max-width: 980px;
+    }
+    summary { cursor: pointer; font-weight: 700; color: var(--dim); font-size: 0.8rem; letter-spacing:1px; list-style:none; }
+    summary::before { content:'> '; }
+    details[open] summary::before { content:'v '; }
+    .docs { margin-top: 1rem; color: var(--dim); font-size: 0.85rem; line-height: 1.7; }
+    .docs h2 { color: var(--ink); font-size: 0.8rem; margin: 1rem 0 0.25rem; letter-spacing:1px; }
+    .docs h2:first-child { margin-top: 0; }
+    .docs code { background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 0.05em 0.35em; color: var(--accent); }
+
+    /* ---- Game shell ---- */
+    .stage {
+      max-width: 980px; margin: 0 auto;
+      background: var(--panel); border: 3px solid var(--line); border-radius: 6px;
+      box-shadow: 0 0 0 3px #000, 0 12px 40px rgba(0,0,0,0.6);
+      position: relative; overflow: hidden;
+    }
+    /* scanline overlay */
+    .stage::after {
+      content:''; position:absolute; inset:0; pointer-events:none; z-index:50;
+      background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0 2px, rgba(0,0,0,0.18) 2px 4px);
+      mix-blend-mode: multiply;
+    }
+
+    .screen { display:none; padding: 1.1rem; }
+    .screen.active { display:block; }
+
+    h1.title {
+      font-size: clamp(1.6rem, 5vw, 2.8rem); text-align:center; letter-spacing: 2px;
+      color: var(--gold); text-shadow: 0 2px 4px rgba(0,0,0,.6), 0 0 16px rgba(255,216,102,.45);
+      margin: 0.6rem 0 0.2rem;
+    }
+    .subtitle { text-align:center; color: var(--accent); font-size: 0.95rem; letter-spacing:2px; margin-bottom: 1.4rem; }
+
+    .btn {
+      font-family:inherit; font-size: 0.9rem; cursor:pointer;
+      background: var(--panel2); color: var(--ink);
+      border: 2px solid var(--accent); border-radius: 4px; padding: 0.55em 0.9em;
+      box-shadow: 0 3px 0 #000; transition: transform .05s;
+    }
+    .btn:hover { background:#322763; }
+    .btn:active { transform: translateY(3px); box-shadow:none; }
+    .btn.gold { border-color: var(--gold); color: var(--gold); }
+    .btn.green { border-color: var(--green); color: var(--green); }
+    .btn.red { border-color: var(--red); color: var(--red); }
+    .btn.small { font-size: 0.82rem; padding: 0.42em 0.65em; }
+    .btn:disabled { opacity: .35; cursor:not-allowed; box-shadow:none; }
+
+    .center { text-align:center; }
+    .row { display:flex; gap:.5rem; flex-wrap:wrap; }
+
+    /* level select */
+    .levelgrid { display:grid; grid-template-columns: repeat(auto-fill,minmax(150px,1fr)); gap:.8rem; margin-top:1rem; }
+    .levelcard {
+      background: var(--panel2); border:2px solid var(--line); border-radius:4px; padding:.8rem;
+      cursor:pointer; box-shadow:0 3px 0 #000;
+    }
+    .levelcard:hover { border-color: var(--accent); }
+    .levelcard.locked { opacity:.4; cursor:not-allowed; }
+    .levelcard .num { color: var(--accent); font-size:.78rem; letter-spacing:1px; }
+    .levelcard .nm { font-weight:700; font-size:.98rem; margin:.25rem 0; }
+    .levelcard .wd { color: var(--dim); font-size:.72rem; letter-spacing:1px; }
+    .stars { color: var(--gold); font-size:.9rem; letter-spacing:2px; min-height:1em; }
+    .world-h { color: var(--gold); font-size:.9rem; letter-spacing:2px; margin:1.2rem 0 .2rem; border-bottom:1px solid var(--line); padding-bottom:.3rem; }
+
+    /* in-game layout */
+    .topbar { display:flex; justify-content:space-between; align-items:center; gap:.5rem; flex-wrap:wrap; margin-bottom:.7rem; }
+    .topbar .lvl { color: var(--gold); font-size:.9rem; letter-spacing:1px; }
+    .game-grid { display:grid; grid-template-columns: 1.15fr .85fr; gap:.8rem; }
+    @media (max-width: 760px){ .game-grid{ grid-template-columns:1fr; } }
+
+    .panel {
+      background: var(--panel2); border:2px solid var(--line); border-radius:4px; padding:.6rem .7rem;
+    }
+    .panel h3 { font-size:.78rem; color: var(--dim); letter-spacing:1px; margin-bottom:.4rem; text-transform:uppercase; }
+
+    canvas { display:block; width:100%; background:#000; border:2px solid var(--line); border-radius:3px; }
+    /* scene art stays chunky-pixel; the timeline graph renders sharp (it has text) */
+    #sceneCanvas { aspect-ratio: 16/10; image-rendering:pixelated; }
+    #graphCanvas { aspect-ratio: 16/7; image-rendering:auto; }
+
+    .quest { line-height:1.65; font-size:.95rem; }
+    .quest .say { color: var(--accent); }
+    .goal { display:flex; gap:.5rem; align-items:flex-start; font-size:.9rem; line-height:1.45; margin:.3rem 0; color: var(--dim); }
+    .goal .bx { color: var(--line); }
+    .goal.done { color: var(--green); }
+    .goal.done .bx { color: var(--green); }
+
+    .editor .erow { display:flex; align-items:center; gap:.35rem; margin:.3rem 0; flex-wrap:wrap; }
+    .editor .elabel { width:78px; font-size:.82rem; color: var(--dim); letter-spacing:1px; }
+    .editor .opt {
+      font-family:inherit; font-size:.8rem; cursor:pointer; padding:.3em .6em;
+      background: var(--panel); color: var(--ink); border:1px solid var(--line); border-radius:3px;
+    }
+    .editor .opt.sel { border-color: var(--gold); color: var(--gold); }
+    .editor .opt.dirty { box-shadow:0 0 0 1px var(--red) inset; }
+
+    .actionbar { display:flex; gap:.4rem; flex-wrap:wrap; margin-top:.5rem; }
+    .act { display:flex; flex-direction:column; align-items:center; }
+    .act small { color: var(--dim); font-size:.68rem; margin-top:3px; letter-spacing:.5px; }
+
+    .status-files .f { font-size:.9rem; display:flex; justify-content:space-between; padding:.2rem 0; gap:.5rem; color: var(--ink); }
+    .status-files .staged { color: var(--green); font-weight:700; }
+    .status-files .mod { color: var(--red); font-weight:700; }
+    .status-files .clean { color: var(--dim); }
+
+    .cmdlog { background:#05040d; border:2px solid var(--line); border-radius:3px; padding:.5rem; height:130px; overflow:auto; font-size:.82rem; line-height:1.55; }
+    .cmdlog .c { color: var(--green); }
+    .cmdlog .c::before { content:'$ '; color: var(--dim); }
+    .cmdlog .o { color: var(--dim); }
+
+    .term { display:flex; gap:.4rem; margin-top:.4rem; }
+    .term input { flex:1; font-family:inherit; font-size:.88rem; background:#05040d; color:var(--green); border:2px solid var(--line); border-radius:3px; padding:.45em .55em; }
+    .term input::placeholder { color: var(--line); }
+    .locktag { font-size:.72rem; color: var(--dim); }
+
+    .toast { position:absolute; left:50%; transform:translateX(-50%); top:14px; z-index:60;
+      background:#000; border:2px solid var(--gold); color:var(--gold); padding:.5em .9em; border-radius:4px;
+      font-size:.88rem; opacity:0; transition:opacity .25s, top .25s; pointer-events:none; max-width:90%; text-align:center;}
+    .toast.show { opacity:1; top:22px; }
+    .toast.err { border-color: var(--red); color: var(--red); }
+
+    /* overlays */
+    .overlay { position:absolute; inset:0; z-index:70; background:rgba(5,4,13,.92); display:none; align-items:center; justify-content:center; padding:1rem; }
+    .overlay.show { display:flex; }
+    .modal { background:var(--panel); border:3px solid var(--gold); border-radius:6px; padding:1.4rem; max-width:560px; width:100%; max-height:85%; overflow:auto; box-shadow:0 0 0 3px #000; }
+    .modal h2 { color:var(--gold); letter-spacing:1px; margin-bottom:.6rem; font-size:1.25rem; }
+    .modal p { color: var(--dim); font-size:.92rem; line-height:1.65; margin:.4rem 0; }
+    .modal .big { font-size:2rem; text-align:center; color:var(--gold); margin:.3rem 0; }
+    .glos dt { color: var(--accent); font-size:.9rem; margin-top:.7rem; }
+    .glos dd { color: var(--dim); font-size:.86rem; line-height:1.55; margin-left:0; }
+
+    .conflict .cf { background:var(--panel2); border:1px solid var(--red); border-radius:3px; padding:.5rem; margin:.5rem 0; }
+    .conflict .cf .opt { display:block; width:100%; text-align:left; margin:.3rem 0; }
+
+    /* picker + input overlays (game-native replacements for prompt/confirm) */
+    .modal.sm { max-width:420px; border-color:var(--accent); }
+    .modal.sm h2 { color:var(--accent); }
+    .picker-list { display:flex; flex-direction:column; gap:.4rem; margin:.8rem 0; }
+    .picker-opt {
+      font-family:inherit; font-size:.92rem; cursor:pointer; text-align:left;
+      background:var(--panel2); color:var(--ink); border:2px solid var(--line);
+      border-radius:4px; padding:.55em .7em; box-shadow:0 3px 0 #000; transition:transform .05s;
+    }
+    .picker-opt:hover { border-color:var(--accent); background:#322763; }
+    .picker-opt:active { transform:translateY(3px); box-shadow:none; }
+    .picker-opt .sub { display:block; color:var(--dim); font-size:.76rem; margin-top:3px; }
+    .picker-opt.all { border-color:var(--gold); color:var(--gold); }
+    .picker-opt.warn { border-color:var(--red); }
+    .name-input {
+      width:100%; font-family:inherit; font-size:.95rem; margin:.8rem 0;
+      background:#05040d; color:var(--ink); border:2px solid var(--accent);
+      border-radius:4px; padding:.55em .7em;
+    }
+    .name-input::placeholder { color:var(--line); }
+  </style>
+</head>
+<body>
+  <nav><a href="../index.html">&larr; Back to experiments</a></nav>
+
+  <details>
+    <summary>How this works</summary>
+    <div class="docs">
+      <h2>About</h2>
+      <p><strong>Git Time Traveler</strong> teaches git to a non-technical person by leaning on one metaphor that happens to be technically accurate: <em>git is a time machine with parallel timelines</em>. You build a little pixel world (the "working directory"), place the parts you want to keep on the <em>Staging Altar</em>, and stamp a <em>Save Point</em> (a commit). The growing pixel timeline graph is the real commit history.</p>
+
+      <h2>How to use</h2>
+      <p>Pick a level. Read the quest, then change the world with the <strong>World Editor</strong> buttons, <strong>Stage</strong> what you want to keep, and create a <strong>Save Point</strong>. Across <strong>3 worlds (10 levels)</strong> you unlock <strong>branches</strong> (parallel timelines), <strong>merging</strong> and <strong>conflict</strong> resolution, and finally the collaborative loop — a <strong>remote</strong> "Cloud Mirror" you <strong>push</strong>, <strong>fetch</strong> and <strong>pull</strong> with a teammate. From World 2 on, a real-command terminal unlocks so you can graduate from buttons to typing actual <code>git</code> commands. Every action also prints the equivalent real command into the <strong>Command Log</strong>. Progress and stars are saved in your browser.</p>
+
+      <h2>Technical details</h2>
+      <p>A small but faithful in-memory git engine (commits with parent links, branches, HEAD, working tree, staging index, fast-forward + 3-way merge with conflict detection via a common-ancestor diff, plus a second commit store standing in for a <em>remote</em> with origin/* tracking refs and push/fetch/pull) drives the whole game; level objectives are validated against the real engine state, not scripted. Everything renders to two <code>&lt;canvas&gt;</code> elements with hand-drawn pixel art. Pure vanilla HTML/CSS/JS, no imports, single file.</p>
+    </div>
+  </details>
+
+  <div class="stage" id="stage">
+    <div class="toast" id="toast"></div>
+
+    <!-- TITLE -->
+    <section class="screen active" id="screen-title">
+      <h1 class="title">GIT TIME TRAVELER</h1>
+      <div class="subtitle">~ learn git as time travel ~</div>
+      <canvas id="titleCanvas" style="aspect-ratio:16/6; max-width:560px; margin:0 auto 1.3rem;"></canvas>
+      <div class="center row" style="justify-content:center;">
+        <button class="btn gold" id="startBtn">&#9654; START QUEST</button>
+        <button class="btn" id="glosBtn1">GLOSSARY</button>
+      </div>
+      <p class="center" style="color:var(--dim); font-size:.72rem; margin-top:1rem;">No git knowledge needed. You'll be fluent in 10 levels.</p>
+    </section>
+
+    <!-- LEVEL SELECT -->
+    <section class="screen" id="screen-levels">
+      <div class="topbar">
+        <span class="lvl">CHOOSE YOUR TIMELINE</span>
+        <button class="btn small" id="backTitle">&larr; Title</button>
+      </div>
+      <div id="levelList"></div>
+    </section>
+
+    <!-- GAME -->
+    <section class="screen" id="screen-game">
+      <div class="topbar">
+        <span class="lvl" id="gameTitle">Level</span>
+        <div class="row">
+          <button class="btn small" id="hintBtn">HINT</button>
+          <button class="btn small" id="glosBtn2">GLOSSARY</button>
+          <button class="btn small" id="resetBtn">RESET</button>
+          <button class="btn small" id="toLevels">LEVELS</button>
+        </div>
+      </div>
+
+      <div class="game-grid">
+        <!-- LEFT: world + graph -->
+        <div>
+          <div class="panel" style="margin-bottom:.7rem;">
+            <h3 id="sceneLabel">Working Directory &mdash; your world right now</h3>
+            <canvas id="sceneCanvas"></canvas>
+          </div>
+          <div class="panel">
+            <h3>Timeline &mdash; your save points</h3>
+            <canvas id="graphCanvas"></canvas>
+          </div>
+        </div>
+
+        <!-- RIGHT: quest + controls -->
+        <div>
+          <div class="panel" style="margin-bottom:.7rem;">
+            <h3>Quest</h3>
+            <div class="quest" id="questText"></div>
+            <div id="goalList" style="margin-top:.5rem;"></div>
+          </div>
+
+          <div class="panel editor" style="margin-bottom:.7rem;">
+            <h3>World Editor</h3>
+            <div id="editorRows"></div>
+          </div>
+
+          <div class="panel" style="margin-bottom:.7rem;">
+            <h3>Actions</h3>
+            <div class="actionbar" id="actionBar"></div>
+          </div>
+
+          <div class="panel" style="margin-bottom:.7rem;">
+            <h3>Status</h3>
+            <div class="status-files" id="statusFiles"></div>
+          </div>
+
+          <div class="panel">
+            <h3>Command Log <span class="locktag" id="termLock">(terminal locks until World 2)</span></h3>
+            <div class="cmdlog" id="cmdLog"></div>
+            <div class="term" id="termWrap" style="display:none;">
+              <input id="termInput" placeholder="type real git here, e.g. git commit -m &quot;...&quot;" autocomplete="off" spellcheck="false">
+              <button class="btn small green" id="termRun">RUN</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- OVERLAYS -->
+    <div class="overlay" id="winOverlay">
+      <div class="modal center">
+        <div class="big" id="winStars">&#9733;&#9733;&#9733;</div>
+        <h2 id="winTitle">TIMELINE SECURED!</h2>
+        <p id="winMsg"></p>
+        <div class="row" style="justify-content:center; margin-top:1rem;">
+          <button class="btn green" id="nextBtn">NEXT LEVEL &rarr;</button>
+          <button class="btn small" id="winLevels">LEVELS</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="overlay" id="glosOverlay">
+      <div class="modal">
+        <h2>GLOSSARY &mdash; git in plain words</h2>
+        <dl class="glos" id="glosList"></dl>
+        <div class="center" style="margin-top:1rem;"><button class="btn" id="glosClose">CLOSE</button></div>
+      </div>
+    </div>
+
+    <div class="overlay" id="conflictOverlay">
+      <div class="modal conflict">
+        <h2>&#9889; TIME PARADOX!</h2>
+        <p>Two timelines changed the <strong>same thing</strong> in different ways. Git can't guess which you want &mdash; <em>you</em> decide. Pick a version for each clash:</p>
+        <div id="conflictBody"></div>
+        <div class="center" style="margin-top:1rem;">
+          <button class="btn green" id="conflictResolve" disabled>SEAL THE TIMELINE (commit merge)</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="overlay" id="pickerOverlay">
+      <div class="modal sm">
+        <h2 id="pickerTitle">Choose</h2>
+        <p id="pickerSub" style="display:none;"></p>
+        <div class="picker-list" id="pickerList"></div>
+        <div class="center"><button class="btn small" id="pickerCancel">CANCEL</button></div>
+      </div>
+    </div>
+
+    <div class="overlay" id="inputOverlay">
+      <div class="modal sm">
+        <h2 id="inputTitle">Name it</h2>
+        <input class="name-input" id="inputField" autocomplete="off" spellcheck="false">
+        <div class="row" style="justify-content:center;">
+          <button class="btn green" id="inputOk">CONFIRM</button>
+          <button class="btn small" id="inputCancel">CANCEL</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ============================================================
+   GIT TIME TRAVELER
+   A faithful-enough in-memory git engine + pixel renderer.
+   ============================================================ */
+(function(){
+  "use strict";
+
+  /* ---------- tiny helpers ---------- */
+  const $ = s => document.querySelector(s);
+  const clone = o => JSON.parse(JSON.stringify(o));
+  const eq = (a,b) => JSON.stringify(a) === JSON.stringify(b);
+
+  /* ---------- world / file model ----------
+     A "file" is one knob of the pixel world. A commit snapshots all knobs. */
+  const KNOBS = {
+    sky:      { label:'sky',     values:['day','sunset','night','storm'] },
+    tree:     { label:'tree',    values:['none','sapling','tree','blossom'] },
+    flowers:  { label:'flowers', values:['none','red','blue','rainbow'] },
+    creature: { label:'pet',     values:['none','cat','bird','dragon'] },
+  };
+  const FILE_OF = { sky:'sky.txt', tree:'tree.txt', flowers:'flowers.txt', creature:'pet.txt' };
+
+  /* ---------- git engine ---------- */
+  function newRepo(){
+    // remote = the "Cloud Mirror" (origin): its own copy of commits + branch tips.
+    // remoteTracking = local memory of where origin's branches were last seen
+    // (e.g. 'origin/main'), updated by fetch/pull/push.
+    return { commits:{}, seq:0, branches:{}, HEAD:{branch:'main'}, work:{}, index:{},
+             remote:null, remoteTracking:{} };
+  }
+  function headCommitId(r){
+    return r.HEAD.branch ? (r.branches[r.HEAD.branch] || null) : r.HEAD.detached;
+  }
+  function headTree(r){
+    const id = headCommitId(r);
+    return id ? clone(r.commits[id].tree) : {};
+  }
+  function makeCommit(r, parents, tree, message){
+    const id = 'c'+(++r.seq);
+    r.commits[id] = { id, parents:parents.slice(), tree:clone(tree), message, n:r.seq };
+    return id;
+  }
+  // generation = longest path to a root (for graph layout + merge-base)
+  function generation(r, id, memo={}){
+    if(memo[id]!=null) return memo[id];
+    const c = r.commits[id];
+    if(!c || !c.parents.length){ return memo[id]=0; }
+    let g=0; c.parents.forEach(p=>{ g=Math.max(g, 1+generation(r,p,memo)); });
+    return memo[id]=g;
+  }
+  function ancestors(r, id){
+    const set=new Set(), stack=[id];
+    while(stack.length){ const x=stack.pop(); if(set.has(x)||!r.commits[x])continue; set.add(x); r.commits[x].parents.forEach(p=>stack.push(p)); }
+    return set;
+  }
+  function isAncestor(r, a, b){ return ancestors(r,b).has(a); } // is a an ancestor of b
+  function mergeBase(r, a, b){
+    const A=ancestors(r,a); let best=null, bestG=-1;
+    ancestors(r,b).forEach(x=>{ if(A.has(x)){ const g=generation(r,x); if(g>bestG){bestG=g; best=x;} }});
+    return best;
+  }
+
+  /* status diffs */
+  function staged(r){ const h=headTree(r), out=[]; for(const k in r.index){ if(r.index[k]!==h[k]) out.push(k); } return out; }
+  function unstaged(r){ const out=[]; for(const k in r.work){ if(r.work[k]!==r.index[k]) out.push(k); } return out; }
+
+  /* ---------- game state ---------- */
+  const G = {
+    repo:null, level:0, flags:{}, hintIdx:0,
+    pendingConflict:null,
+    progress: loadProgress(),
+  };
+
+  function loadProgress(){
+    try{ return JSON.parse(localStorage.getItem('git-time-traveler')) || {max:1, stars:{}}; }
+    catch(e){ return {max:1, stars:{}}; }
+  }
+  function saveProgress(){ try{ localStorage.setItem('git-time-traveler', JSON.stringify(G.progress)); }catch(e){} }
+
+  /* ============================================================
+     LEVELS  (Worlds 1-2 : levels 1-7)
+     Each level: world, name, world#, intro lines, editable knobs,
+     actions unlocked, setup(repo), goals[], hints[].
+     ============================================================ */
+  const ACT = { edit:'edit', stage:'stage', commit:'commit', travel:'travel', discard:'discard',
+                revert:'revert', branch:'branch', switch:'switch', merge:'merge',
+                /* World 3 — collaboration */
+                remote:'remote', push:'push', fetch:'fetch', pull:'pull' };
+
+  /* The garden is ONE evolving place. Each level's `enter` is the canonical
+     state of the garden when that level begins (used when you jump in from the
+     menu). When you advance via NEXT, the garden you actually left behind is
+     carried forward in G.saga and used instead, so your choices persist. */
+  const LEVELS = [
+    /* ---------- WORLD 1 ---------- */
+    {
+      n:1, world:1, name:'First Save',
+      enter:{ sky:'day', tree:'none', flowers:'none', creature:'none' },
+      intro:[
+        "GUIDE: Welcome! This empty plot is your garden — your <span class='say'>working directory</span>. It's already recorded as one starting <span class='say'>save point</span> (the single dot on the Timeline).",
+        "Plant something! In the <b>World Editor</b>, set <b>tree → sapling</b>. Watch the <b>Status</b> panel: only <b>tree.txt</b> turns <span class='say'>✎ modified</span> — git tracks exactly what you changed, nothing else.",
+        "Then <b>Stage</b> it (move it to the green '● staged' list) and stamp a new <b>Save Point</b>. Changed your mind before saving? <b>Discard</b> throws unsaved edits away."
+      ],
+      editable:['tree','flowers'],
+      actions:[ACT.edit,ACT.stage,ACT.commit,ACT.discard],
+      setup(r, base){
+        const id=makeCommit(r,[],clone(base),'an empty plot'); r.branches.main=id;
+        r.work=clone(base); r.index=clone(base);
+      },
+      goals:[
+        { id:'change', label:'Plant a tree or flowers — only that one file becomes ✎ modified', test:(r,f)=>f.everEdited },
+        { id:'stage', label:'Stage your change (move it to the ● staged list)', test:(r,f)=>f.everStaged },
+        { id:'commit', label:'Make your save point', test:(r)=>Object.keys(r.commits).length>=2 },
+      ],
+      hints:[
+        "World Editor → tree → sapling. In Status, notice ONLY tree.txt becomes ✎ modified — everything else stays · unchanged.",
+        "Click STAGE and pick tree.txt. It jumps to the green ● staged list = 'will be saved next'.",
+        "Click SAVE POINT and name it. (Try DISCARD too: edit something, then discard to undo it before saving.)"
+      ],
+      done:"You made a save point! See how only the file you touched went · unchanged → ✎ modified → ● staged → saved. That before→after flow is the whole heart of git."
+    },
+    {
+      n:2, world:1, name:'The Staging Altar',
+      enter:{ sky:'day', tree:'sapling', flowers:'none', creature:'none' },
+      intro:[
+        "GUIDE: Seasons pass and your sapling is taking root. A save point doesn't have to include <em>everything</em> you change at once.",
+        "The <span class='say'>staging altar</span> lets you pick exactly what goes into each save point.",
+        "Two things changed in your garden: lovely <b>flowers</b>, and an ugly <b>storm</b>. Save ONLY the flowers. Leave the storm unsaved."
+      ],
+      editable:['sky','flowers'],
+      actions:[ACT.edit,ACT.stage,ACT.commit,ACT.discard],
+      setup(r, base){
+        const start=clone(base); const calmSky=start.sky;
+        const id=makeCommit(r, [], start, 'the garden so far'); r.branches.main=id;
+        r.work=clone(start); r.index=clone(start);
+        // the two pending changes the player must sort out
+        r.work.flowers='red'; r.work.sky='storm';
+        G.l2calm=calmSky; // remember the calm sky so goals aren't hardcoded
+      },
+      goals:[
+        { id:'commit', label:'Make a save point that INCLUDES the flowers', test:(r)=>committedHas(r,'flowers','red') },
+        { id:'nostorm', label:'...but does NOT include the storm (sky stays calm in the save point)', test:(r)=>committedHas(r,'sky',G.l2calm) && committedHas(r,'flowers','red') },
+        { id:'stormleft', label:'Leave the storm only in the working garden (unsaved)', test:(r)=>r.work.sky==='storm' && committedHas(r,'sky',G.l2calm) && committedHas(r,'flowers','red') },
+      ],
+      hints:[
+        "Click STAGE, then in the chooser pick ONLY flowers.txt — not sky.txt.",
+        "Stage flowers.txt, then SAVE POINT.",
+        "Check Status: sky.txt should still be ✎ modified (red) after you commit. That's correct!"
+      ],
+      done:"Perfect. The save point holds the flowers; the storm stays only in your working garden. That selective control IS the staging area."
+    },
+    {
+      n:3, world:1, name:'Time Travel',
+      enter:{ sky:'day', tree:'tree', flowers:'red', creature:'none' },
+      intro:[
+        "GUIDE: Look how far your garden has come — every step is a save point you can return to.",
+        "This is your garden's own growth history. Use <b>Time Travel</b> to visit an <span class='say'>older</span> moment — watch the garden rewind to how it was.",
+        "Then travel back to <span class='say'>NOW</span> (the latest point) so you don't get stranded in the past."
+      ],
+      editable:[],
+      actions:[ACT.travel],
+      setup(r, base){
+        // retell the garden's growth, always ending where the player actually is
+        let p=null;
+        const stages=[
+          [{sky:'day',tree:'none',flowers:'none',creature:'none'}, 'an empty plot'],
+          [{sky:'day',tree:'sapling',flowers:'none',creature:'none'}, 'planted a sapling'],
+          [{sky:'day',tree:'tree',flowers:'none',creature:'none'}, 'it grew into a tree'],
+          [clone(base), 'the flowers bloom'],
+          [Object.assign(clone(base),{sky:'sunset'}), 'evening falls on the garden'],
+        ];
+        stages.forEach(([t,msg])=>{ p=makeCommit(r, p?[p]:[], t, msg); r.branches.main=p; });
+        const h=headTree(r); r.work=clone(h); r.index=clone(h);
+      },
+      goals:[
+        { id:'back', label:'Time travel to an OLDER save point (see the past)', test:(r,f)=>f.visitedPast },
+        { id:'now', label:'Return to NOW (the latest save point)', test:(r,f)=>f.visitedPast && r.HEAD.branch==='main' },
+      ],
+      hints:[
+        "Click TIME TRAVEL and pick an early moment like 'planted a sapling'. The garden rewinds!",
+        "Notice the timeline marker moves. Nothing is lost — you're just looking.",
+        "Click TIME TRAVEL again and choose 'Return to NOW' to come back to the present."
+      ],
+      done:"You just rewound time and came back safely. Commits are permanent snapshots — visiting the past never destroys the future."
+    },
+    {
+      n:4, world:1, name:'The Undo',
+      enter:{ sky:'sunset', tree:'tree', flowers:'red', creature:'none' },
+      intro:[
+        "GUIDE: Disaster! A <b>storm</b> rolled over your evening garden — and it got SAVED as a save point. Yuck.",
+        "Use <b>Revert</b> to create a new save point that undoes the bad one — history stays honest, and your garden is restored.",
+      ],
+      editable:[],
+      actions:[ACT.revert,ACT.travel],
+      setup(r, base){
+        const good=clone(base);
+        const g=makeCommit(r, [], good, 'the garden, thriving'); r.branches.main=g;
+        const storm=Object.assign(clone(base),{sky:'storm',flowers:'none'});
+        const s=makeCommit(r, [g], storm, 'RUINED: a storm killed the flowers'); r.branches.main=s;
+        const h=headTree(r); r.work=clone(h); r.index=clone(h);
+        G.l4good=good;
+      },
+      goals:[
+        { id:'revert', label:'Revert the storm: undo it with a new save point', test:(r)=> r.HEAD.branch==='main' && eq(headTree(r), G.l4good) && Object.keys(r.commits).length>=3 },
+      ],
+      hints:[
+        "Click REVERT and choose the bad save point ('RUINED: a storm...').",
+        "Revert makes a NEW save point that cancels the bad one — it doesn't delete history.",
+        "After reverting, your thriving garden returns and the timeline grows by one."
+      ],
+      done:"The storm is undone without erasing the past. 'Revert' is the safe undo: it adds a save point that reverses a previous one."
+    },
+
+    /* ---------- WORLD 2 ---------- */
+    {
+      n:5, world:2, name:'A New Timeline', termHint:true,
+      enter:{ sky:'sunset', tree:'tree', flowers:'red', creature:'none' },
+      intro:[
+        "GUIDE: Your garden is beautiful. Want to try something wild without risking it? Make a <span class='say'>branch</span> — a parallel timeline.",
+        "Create a branch called <b>experiment</b>, switch to it, add a <b>dragon</b>, and save it there.",
+        "Your <b>main</b> garden stays untouched. (New: you can type real commands in the terminal now!)"
+      ],
+      editable:['creature','sky'],
+      actions:[ACT.edit,ACT.stage,ACT.commit,ACT.discard,ACT.branch,ACT.switch],
+      setup(r, base){
+        const id=makeCommit(r,[],clone(base),'our beautiful garden'); r.branches.main=id;
+        r.work=clone(base); r.index=clone(base);
+      },
+      goals:[
+        { id:'branch', label:"Create a branch named 'experiment'", test:(r)=>'experiment' in r.branches },
+        { id:'switch', label:'Switch onto the experiment timeline', test:(r,f)=>f.wasOnExperiment },
+        { id:'dragon', label:'Add a dragon and save it (on experiment)', test:(r)=> r.branches.experiment && r.commits[r.branches.experiment] && r.commits[r.branches.experiment].tree.creature==='dragon' },
+        { id:'mainsafe', label:'Keep main safe (no dragon on main)', test:(r)=> r.branches.main && r.commits[r.branches.main].tree.creature!=='dragon' },
+      ],
+      hints:[
+        "Click BRANCH, name it 'experiment'. Or type: git branch experiment",
+        "Click SWITCH → experiment (or: git switch experiment). The garden here is yours to experiment with.",
+        "Set pet → dragon, STAGE, SAVE POINT. Notice main never changed."
+      ],
+      done:"Two timelines now exist. Branches are cheap, safe sandboxes — the heart of how real teams work."
+    },
+    {
+      n:6, world:2, name:'Fuse the Timelines', termHint:true,
+      enter:{ sky:'sunset', tree:'tree', flowers:'red', creature:'none' },
+      intro:[
+        "GUIDE: Your experiment worked — the dragon is wonderful! Time to bring it home.",
+        "The <b>experiment</b> timeline added a dragon to your garden. Switch to <b>main</b> and <b>Merge</b> experiment in.",
+        "Your gardens changed different things, so they combine cleanly."
+      ],
+      editable:[],
+      actions:[ACT.switch,ACT.merge,ACT.travel],
+      setup(r, base){
+        const m=makeCommit(r,[],clone(base),'our beautiful garden'); r.branches.main=m;
+        const ex=Object.assign(clone(base),{creature:'dragon'});
+        const e=makeCommit(r,[m],ex,'added a dragon'); r.branches.experiment=e;
+        r.HEAD={branch:'main'}; const h=headTree(r); r.work=clone(h); r.index=clone(h);
+      },
+      goals:[
+        { id:'onmain', label:'Be on the main timeline', test:(r)=>r.HEAD.branch==='main' },
+        { id:'merged', label:'Merge experiment into main (dragon arrives on main)', test:(r)=> r.HEAD.branch==='main' && headTree(r).creature==='dragon' },
+      ],
+      hints:[
+        "Click SWITCH → main first (or: git switch main).",
+        "Click MERGE → experiment (or: git merge experiment).",
+        "The dragon now lives in your main garden. Clean merge — no clashes!"
+      ],
+      done:"Merged! When two timelines change different things, git fuses them automatically. Collaboration in a nutshell."
+    },
+    {
+      n:7, world:2, name:'The Paradox', termHint:true,
+      enter:{ sky:'sunset', tree:'tree', flowers:'red', creature:'dragon' },
+      intro:[
+        "GUIDE: The final trial. You and a friend (the <b>nightcrew</b>) both reworked the same garden, and you both changed the <em>sky</em>.",
+        "Your <b>main</b> garden keeps the <b>sunset</b>; <b>nightcrew</b> made it <b>night</b>. Git can't guess — this is a <span class='say'>merge conflict</span> (a time paradox).",
+        "Merge <b>nightcrew</b> into main, then YOU choose how to resolve the clash."
+      ],
+      editable:[],
+      actions:[ACT.switch,ACT.merge,ACT.travel],
+      setup(r, base){
+        const start=Object.assign(clone(base),{sky:'day',flowers:'none'});
+        const b=makeCommit(r,[],start,'the shared garden'); r.branches.main=b;
+        const mainT=Object.assign(clone(start),{sky:'sunset',flowers:'red'});
+        const m=makeCommit(r,[b],mainT,'main: a red-flowered sunset'); r.branches.main=m;
+        const nightT=Object.assign(clone(start),{sky:'night'});
+        const nc=makeCommit(r,[b],nightT,'nightcrew: a starry night'); r.branches.nightcrew=nc;
+        r.HEAD={branch:'main'}; const h=headTree(r); r.work=clone(h); r.index=clone(h);
+      },
+      goals:[
+        { id:'merge', label:'Merge nightcrew into main and resolve the paradox', test:(r)=>{ const id=r.branches.main; return id && r.commits[id].parents.length===2; } },
+      ],
+      hints:[
+        "Make sure you're on main (SWITCH → main), then MERGE → nightcrew.",
+        "A paradox popup appears for sky (sunset vs night). The flowers merge automatically — only the sky truly clashes. Pick the sky you want.",
+        "Choosing a side and sealing it creates a special merge save point with TWO parents."
+      ],
+      done:"You resolved a real merge conflict — the thing that scares most beginners. Next: leave your private timelines behind and share your world with a whole team."
+    },
+
+    /* ---------- WORLD 3 — The Shared World (remote / push / pull / teamwork) ---------- */
+    {
+      n:8, world:3, name:'The Cloud Mirror', termHint:true,
+      enter:{ sky:'night', tree:'tree', flowers:'red', creature:'dragon' },
+      intro:[
+        "GUIDE: Your garden is glorious — time to share it. A <span class='say'>remote</span> is a <b>Cloud Mirror</b>: a copy of your timelines that other travelers (your team) can also reach. The usual one is named <b>origin</b>.",
+        "First <b>connect</b> the Cloud Mirror, then <b>push</b> your <b>main</b> timeline up to it.",
+        "After pushing, a new marker <b>origin/main</b> appears on the Timeline — it shows where the shared copy is. Get it to sit on the same save point as your local main."
+      ],
+      editable:[],
+      actions:[ACT.remote,ACT.push,ACT.fetch,ACT.travel],
+      setup(r, base){
+        const a=makeCommit(r,[],clone(base),'our beautiful garden'); r.branches.main=a;
+        const h=headTree(r); r.work=clone(h); r.index=clone(h);
+        // no remote yet — the player connects it
+      },
+      goals:[
+        { id:'connect', label:'Connect the Cloud Mirror (git remote add origin)', test:(r)=>!!r.remote },
+        { id:'pushed', label:'Push main up to the Mirror', test:(r)=> !!r.remote && r.remote.branches.main===r.branches.main && !!r.branches.main },
+        { id:'insync', label:'origin/main now matches your local main', test:(r)=> r.remoteTracking['origin/main'] && r.remoteTracking['origin/main']===r.branches.main },
+      ],
+      hints:[
+        "Click CONNECT MIRROR (or type: git remote add origin ...). That creates 'origin'.",
+        "Click PUSH (or: git push). Your save points upload to the shared copy.",
+        "Watch the Timeline: an origin/main tag lands on the same dot as main. That means the team can now see your garden."
+      ],
+      done:"Your garden lives in the Cloud Mirror now. 'origin' is the shared copy; 'push' uploads your save points so teammates can reach them."
+    },
+    {
+      n:9, world:3, name:'Catching Up', termHint:true,
+      enter:{ sky:'night', tree:'tree', flowers:'red', creature:'dragon' },
+      intro:[
+        "GUIDE: While you slept, a teammate added <b>blossoms</b> to the shared garden and pushed them to the Cloud Mirror. Your local copy hasn't caught up yet.",
+        "Use <b>Fetch</b> to peek at what's new (it downloads without changing your garden), then <b>Pull</b> to bring it down. Because you made no conflicting changes, this is a clean <span class='say'>fast-forward</span>.",
+        "Notice <b>origin/main</b> already sits ahead of your <b>main</b> — pull catches you up."
+      ],
+      editable:[],
+      actions:[ACT.fetch,ACT.pull,ACT.push,ACT.travel],
+      setup(r, base){
+        const a=makeCommit(r,[],clone(base),'our beautiful garden'); r.branches.main=a;
+        // remote already exists and is AHEAD: teammate pushed a blossom commit.
+        const rem=ensureRemote(r);
+        copyHistory(r.commits, rem.commits, a);
+        const teammateTree=Object.assign(clone(r.commits[a].tree),{tree:'blossom'});
+        const b=makeCommit(r,[a],teammateTree,'teammate: the tree blossoms'); // lands in r.commits
+        rem.commits[b]=clone(r.commits[b]);
+        rem.branches.main=b;
+        // we already pushed `a` earlier, so our tracking knows origin used to be at `a`.
+        r.remoteTracking['origin/main']=a;
+        const h=headTree(r); r.work=clone(h); r.index=clone(h);
+      },
+      goals:[
+        { id:'fetched', label:'Fetch to see the teammate’s work (origin/main moves ahead)', test:(r,f)=>f.didFetch || (r.remote && r.remoteTracking['origin/main']===r.remote.branches.main && r.remoteTracking['origin/main']!==undefined) },
+        { id:'pulled', label:'Pull to fast-forward your main up to the team', test:(r)=> r.remote && r.branches.main===r.remote.branches.main && headTree(r).tree==='blossom' },
+      ],
+      hints:[
+        "Click FETCH (or: git fetch). The origin/main marker jumps ahead of your main — that's the teammate's new save point.",
+        "Click PULL (or: git pull). Your main slides up to meet origin/main — a fast-forward.",
+        "Your garden's tree is now in blossom, matching the shared copy."
+      ],
+      done:"You caught up with the team. 'fetch' downloads news without touching your work; 'pull' fetches AND merges it in — here a clean fast-forward."
+    },
+    {
+      n:10, world:3, name:'Teamwork', termHint:true,
+      enter:{ sky:'night', tree:'blossom', flowers:'red', creature:'dragon' },
+      intro:[
+        "GUIDE: The capstone — the real collaborative loop. You'll change the garden's <b>sky</b> locally. Meanwhile a teammate ALSO changed the sky and pushed it first.",
+        "Make your change &amp; save it, then <b>push</b>. It gets <span class='say'>rejected</span> (non-fast-forward) — the Mirror moved on without you.",
+        "<b>Pull</b> to bring their work down. You both touched the sky, so it's a <span class='say'>paradox</span> — resolve it. Then <b>push</b> again to complete the loop."
+      ],
+      editable:['sky'],
+      actions:[ACT.edit,ACT.stage,ACT.commit,ACT.push,ACT.fetch,ACT.pull],
+      setup(r, base){
+        const start=Object.assign(clone(base),{sky:'sunset'});
+        const a=makeCommit(r,[],start,'shared garden at sunset'); r.branches.main=a;
+        // we are already in sync with origin at `a`...
+        const rem=ensureRemote(r);
+        copyHistory(r.commits, rem.commits, a);
+        rem.branches.main=a;
+        r.remoteTracking['origin/main']=a;
+        // ...but a teammate has since pushed a NIGHT sky on top of `a`.
+        const theirTree=Object.assign(clone(start),{sky:'night'});
+        const b=makeCommit(r,[a],theirTree,'teammate: turned the sky to night');
+        rem.commits[b]=clone(r.commits[b]);
+        rem.branches.main=b;
+        // crucially, our local tracking still thinks origin is at `a` (we haven't fetched)
+        r.remoteTracking['origin/main']=a;
+        // reset working tree to our local tip `a`
+        r.branches.main=a;
+        const h=headTree(r); r.work=clone(h); r.index=clone(h);
+        G.l10base=a;
+      },
+      goals:[
+        { id:'localchange', label:'Change the sky locally and save it', test:(r)=> r.branches.main && r.branches.main!==G.l10base && r.commits[r.branches.main] && r.commits[r.branches.main].parents.length===1 || (r.branches.main && r.commits[r.branches.main] && r.commits[r.branches.main].parents.length===2) },
+        { id:'resolved', label:'Pull and resolve the sky paradox (a 2-parent merge save point)', test:(r)=>{ const id=r.branches.main; return id && r.commits[id] && r.commits[id].parents.length===2; } },
+        { id:'pushed', label:'Push the merged result — the loop is complete', test:(r)=> r.remote && r.remote.branches.main===r.branches.main && r.commits[r.branches.main] && r.commits[r.branches.main].parents.length===2 },
+      ],
+      hints:[
+        "Set sky to anything but night (e.g. storm or day), STAGE sky.txt, SAVE POINT. Then PUSH — it gets REJECTED because the teammate pushed first.",
+        "Click PULL. Because you both changed the sky, a PARADOX popup appears. Pick the sky you want and seal it — that makes a merge save point with TWO parents.",
+        "Now PUSH again. This time it succeeds and origin/main catches up to your merge. Loop complete!"
+      ],
+      done:"You ran the full team loop: commit, get rejected, pull, resolve a real conflict, and push. This is exactly how professionals collaborate every day. You are git-fluent."
+    },
+  ];
+
+  function committedHas(r, knob, val){ const t=headTree(r); return t[knob]===val; }
+
+  /* ============================================================
+     RENDERING  (pixel art on canvas)
+     ============================================================ */
+  function px(ctx, x,y,w,h,c){ ctx.fillStyle=c; ctx.fillRect(x|0,y|0,w|0,h|0); }
+
+  function drawScene(canvas, tree){
+    const ctx=canvas.getContext('2d');
+    const W=160,H=100; canvas.width=W; canvas.height=H;
+    const sky=tree.sky||'day';
+    // sky bg
+    const skyCol={day:'#7ec8ff',sunset:'#ff9e5e',night:'#1b1840',storm:'#5a5e6b'}[sky];
+    px(ctx,0,0,W,H,skyCol);
+    // sun / moon / stars
+    if(sky==='day'){ px(ctx,128,16,16,16,'#fff7c0'); px(ctx,130,18,12,12,'#ffe066'); }
+    if(sky==='sunset'){ px(ctx,120,40,20,20,'#ffd25e'); px(ctx,0,52,W,4,'#ffcf8a'); }
+    if(sky==='night'){ for(let i=0;i<22;i++){ px(ctx,(i*53%150)+4,(i*29%50)+4,2,2,'#fff'); } px(ctx,120,16,14,14,'#e8e8ff'); px(ctx,124,16,10,12,'#1b1840'); }
+    if(sky==='storm'){ for(let i=0;i<5;i++){ px(ctx,10+i*30,8,26,8,'#3a3d47'); } px(ctx,70,16,4,18,'#ffe066'); px(ctx,68,30,8,4,'#ffe066'); }
+    // ground
+    px(ctx,0,80,W,20,'#3aa64a'); px(ctx,0,80,W,4,'#52c95f');
+    // tree
+    const tr=tree.tree||'none';
+    if(tr!=='none'){
+      const tx=44;
+      if(tr==='sapling'){ px(ctx,tx+4,68,4,12,'#7a4a1f'); px(ctx,tx,60,12,10,'#3aa64a'); }
+      else { px(ctx,tx+4,56,6,24,'#7a4a1f');
+        const leaf = tr==='blossom'?'#ff8fc7':'#2f8f3e';
+        px(ctx,tx-6,36,26,26,leaf); px(ctx,tx-2,28,18,12,leaf);
+        if(tr==='blossom'){ px(ctx,tx,40,4,4,'#fff'); px(ctx,tx+12,46,4,4,'#fff'); px(ctx,tx-2,50,4,4,'#fff'); }
+      }
+    }
+    // flowers
+    const fl=tree.flowers||'none';
+    if(fl!=='none'){
+      const map={red:['#ff5b6e'],blue:['#5b8bff'],rainbow:['#ff5b6e','#ffd166','#5bff8b','#5b8bff','#c45bff']};
+      const cols=map[fl];
+      for(let i=0;i<6;i++){ const fx=90+i*10; px(ctx,fx,78,2,6,'#2f8f3e'); px(ctx,fx-2,72,6,6,cols[i%cols.length]); px(ctx,fx,74,2,2,'#fff'); }
+    }
+    // creature
+    const cr=tree.creature||'none';
+    if(cr!=='none'){
+      const cx=18,cy=66;
+      if(cr==='cat'){ px(ctx,cx,cy+6,16,10,'#444'); px(ctx,cx+14,cy+2,8,8,'#444'); px(ctx,cx+14,cy,3,4,'#444'); px(ctx,cx+19,cy,3,4,'#444'); px(ctx,cx+18,cy+4,2,2,'#7cf5ff'); px(ctx,cx-2,cy+8,3,8,'#444'); }
+      if(cr==='bird'){ px(ctx,cx+2,cy+2,10,8,'#ffd166'); px(ctx,cx+10,cy,5,5,'#ffd166'); px(ctx,cx+14,cy+2,3,2,'#ff7b3a'); px(ctx,cx+13,cy+1,2,2,'#000'); }
+      if(cr==='dragon'){ px(ctx,cx-4,cy,24,14,'#7cff9b'); px(ctx,cx+16,cy-4,10,10,'#7cff9b'); px(ctx,cx+22,cy,2,2,'#ff5b6e'); px(ctx,cx-8,cy-2,8,8,'#56d97a'); px(ctx,cx,cy+12,4,4,'#56d97a'); px(ctx,cx+12,cy+12,4,4,'#56d97a'); px(ctx,cx+6,cy-6,4,4,'#ff5b6e'); }
+    }
+  }
+
+  function drawGraph(canvas, r){
+    const ctx=canvas.getContext('2d');
+    // Render at the canvas's real displayed size (x devicePixelRatio) so text
+    // stays sharp instead of being a tiny bitmap stretched up & pixelated.
+    const dpr=window.devicePixelRatio||1;
+    const cssW=canvas.clientWidth||520, cssH=canvas.clientHeight||Math.round(cssW*7/16);
+    const W=Math.round(cssW), H=Math.round(cssH);
+    canvas.width=W*dpr; canvas.height=H*dpr;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.imageSmoothingEnabled=true;
+    px(ctx,0,0,W,H,'#05040d');
+    const ids=Object.keys(r.commits);
+    const fontStack='14px "Courier New", monospace';
+    if(!ids.length){ ctx.fillStyle='#c5bff0'; ctx.font=fontStack; ctx.fillText('no save points yet — make one!',14,H/2); return; }
+    // assign rows by branch lineage
+    const branchColors={main:'#8df8ff',experiment:'#ff9ed2',nightcrew:'#cf86ff'};
+    const palette=['#8df8ff','#ff9ed2','#cf86ff','#ffd866','#86ffa3'];
+    const rowOf={}; const bnames=Object.keys(r.branches); let ri=0;
+    const memo={};
+    bnames.forEach(bn=>{ rowOf[bn]=ri++; });
+    const colOf={}; ids.forEach(id=>{ colOf[id]=generation(r,id,memo); });
+    const maxCol=Math.max(...ids.map(id=>colOf[id]),0);
+    const maxRow=Math.max(ri-1,0);
+    const padL=34, padR=110, padT=26;
+    const dx=Math.min(78,(W-padL-padR)/Math.max(maxCol,1));
+    const dy=Math.min(46,(H-padT*2)/Math.max(maxRow,1)||40);
+    const x0=padL, y0=padT;
+    function commitRow(id){
+      let best=0, bestg=-1;
+      bnames.forEach(bn=>{ if(ancestors(r,r.branches[bn]).has(id)){ const g=generation(r,r.branches[bn],memo); if(g>=bestg){bestg=g;best=rowOf[bn];} } });
+      return best;
+    }
+    const pos={};
+    ids.forEach(id=>{ pos[id]={ x:x0+colOf[id]*dx, y:y0+commitRow(id)*dy }; });
+    // edges
+    ctx.lineWidth=2.5;
+    ids.forEach(id=>{ r.commits[id].parents.forEach(p=>{ if(!pos[p])return;
+      ctx.strokeStyle='#4d3f80'; ctx.beginPath(); ctx.moveTo(pos[p].x,pos[p].y); ctx.lineTo(pos[id].x,pos[id].y); ctx.stroke();
+    }); });
+    // nodes (drawn as smooth-edged squares with a dark outline)
+    const hcid=headCommitId(r);
+    ids.forEach(id=>{ const {x,y}=pos[id];
+      const merge=r.commits[id].parents.length>1;
+      const col=palette[commitRow(id)%palette.length];
+      ctx.fillStyle='#000'; ctx.fillRect(x-9,y-9,18,18);
+      ctx.fillStyle=col;    ctx.fillRect(x-6,y-6,12,12);
+      if(merge){ ctx.fillStyle='#000'; ctx.fillRect(x-2,y-2,4,4); }
+      if(id===hcid){ ctx.strokeStyle='#ffd866'; ctx.lineWidth=2.5; ctx.strokeRect(x-11,y-11,22,22); }
+    });
+    // branch labels at tips — larger, sharp, with a readable backing.
+    // remote-tracking refs (e.g. origin/main) ride just below the local label
+    // for the same dot, in a gold "Cloud Mirror" colour so the shared copy's
+    // position is always visible.
+    const remoteByCommit={};
+    Object.keys(r.remoteTracking||{}).forEach(rt=>{ const id=r.remoteTracking[rt]; if(id){ (remoteByCommit[id]=remoteByCommit[id]||[]).push(rt); } });
+    ctx.font='bold '+fontStack; ctx.textBaseline='middle';
+    bnames.forEach(bn=>{ const id=r.branches[bn]; if(!id||!pos[id])return; const {x,y}=pos[id];
+      const here=r.HEAD.branch===bn;
+      const lbl=(here?'HEAD ▶ ':'')+bn;
+      const lx=x+14;
+      ctx.fillStyle=branchColors[bn]||'#8df8ff';
+      ctx.fillText(lbl, lx, y);
+      // stack any origin/* tag for this dot underneath the branch name
+      if(remoteByCommit[id]){
+        ctx.fillStyle='#ffd866';
+        ctx.fillText('☁ '+remoteByCommit[id].join(' '), lx, y+15);
+        delete remoteByCommit[id];
+      }
+    });
+    // origin/* refs that don't share a dot with a local branch tip (e.g. when
+    // origin/main is ahead of you after a fetch) still get drawn on their dot.
+    Object.keys(remoteByCommit).forEach(id=>{ if(!pos[id])return; const {x,y}=pos[id];
+      ctx.fillStyle='#ffd866'; ctx.fillText('☁ '+remoteByCommit[id].join(' '), x+14, y);
+    });
+    // detached HEAD marker
+    if(!r.HEAD.branch && pos[r.HEAD.detached]){ const {x,y}=pos[r.HEAD.detached];
+      ctx.fillStyle='#ffd866'; ctx.fillText('HEAD ▶ here (past)', x+14, y);
+    }
+    ctx.textBaseline='alphabetic';
+  }
+
+  function drawTitle(){
+    const c=$('#titleCanvas'); const ctx=c.getContext('2d'); const W=240,H=90; c.width=W;c.height=H;
+    px(ctx,0,0,W,H,'#1b1840');
+    for(let i=0;i<30;i++) px(ctx,(i*61%W),(i*37%H),2,2,'#fff');
+    // a simple timeline of glowing nodes
+    const cols=['#7cf5ff','#ff8fc7','#ffd166','#7cff9b'];
+    let y=46;
+    for(let i=0;i<4;i++){ const x=30+i*50; ctx.strokeStyle='#3a2f63'; ctx.lineWidth=2; if(i){ctx.beginPath();ctx.moveTo(x-50,y);ctx.lineTo(x,y);ctx.stroke();} px(ctx,x-6,y-6,12,12,'#000'); px(ctx,x-4,y-4,8,8,cols[i]); }
+    // a branch
+    ctx.strokeStyle='#3a2f63'; ctx.beginPath(); ctx.moveTo(80,46); ctx.lineTo(130,22); ctx.stroke();
+    px(ctx,124,16,12,12,'#000'); px(ctx,126,18,8,8,'#ff8fc7');
+  }
+
+  /* ============================================================
+     ACTIONS (button + terminal share these)
+     ============================================================ */
+  function toast(msg, err){
+    const t=$('#toast'); t.innerHTML=msg; t.className='toast show'+(err?' err':'');
+    clearTimeout(t._t); t._t=setTimeout(()=>{ t.className='toast'+(err?' err':''); }, 2200);
+  }
+  function logCmd(cmd, out){
+    const el=$('#cmdLog'); const d=document.createElement('div'); d.className='c'; d.textContent=cmd; el.appendChild(d);
+    if(out){ const o=document.createElement('div'); o.className='o'; o.textContent=out; el.appendChild(o); }
+    el.scrollTop=el.scrollHeight;
+  }
+
+  function doStageFile(f){ G.repo.index[f]=G.repo.work[f]; G.flags.everStaged=true; }
+  function doStageAll(){ unstaged(G.repo).forEach(doStageFile); }
+
+  function doCommit(msg){
+    const r=G.repo;
+    if(!staged(r).length){ toast('Nothing staged. Stage a change first!',true); return false; }
+    if(!r.HEAD.branch){ toast("You're in the past (detached). Can't save here.",true); return false; }
+    const parent=headCommitId(r);
+    const id=makeCommit(r, parent?[parent]:[], r.index, msg||'save point');
+    r.branches[r.HEAD.branch]=id;
+    G.flags.everCommitted=true;
+    logCmd('git commit -m "'+(msg||'save point')+'"', '['+r.HEAD.branch+' '+id+'] '+(msg||'save point'));
+    return true;
+  }
+
+  function doBranch(name){
+    const r=G.repo;
+    if(!name){ toast('Give the branch a name.',true); return; }
+    if(r.branches[name]){ toast('That timeline already exists.',true); return; }
+    r.branches[name]=headCommitId(r);
+    logCmd('git branch '+name);
+    toast('Created timeline: '+name);
+  }
+  function doSwitch(name){
+    const r=G.repo;
+    if(!(name in r.branches)){ toast('No timeline named '+name,true); return; }
+    if(unstaged(r).length){ toast('Save or discard changes before switching.',true); return; }
+    r.HEAD={branch:name}; const h=headTree(r); r.work=clone(h); r.index=clone(h);
+    if(name==='experiment') G.flags.wasOnExperiment=true;
+    logCmd('git switch '+name, "Switched to branch '"+name+"'");
+    toast('Now on timeline: '+name);
+  }
+  function doTravelTo(id){
+    const r=G.repo;
+    r.HEAD={detached:id}; const h=clone(r.commits[id].tree); r.work=clone(h); r.index=clone(h);
+    if(generation(r,id) < Math.max(...Object.keys(r.commits).map(x=>generation(r,x)))) G.flags.visitedPast=true;
+    logCmd('git checkout '+id, "You are now in a past moment ("+r.commits[id].message+")");
+  }
+  function doReturnNow(){
+    const r=G.repo; r.HEAD={branch:'main'}; const h=headTree(r); r.work=clone(h); r.index=clone(h);
+    logCmd('git switch main', 'Back to NOW.'); toast('Back to the present.');
+  }
+  function doRevert(id){
+    const r=G.repo;
+    const c=r.commits[id]; if(!c){ toast('No such save point.',true); return; }
+    if(c.parents.length!==1){ toast("Can only revert a normal save point.",true); return; }
+    const before=clone(r.commits[c.parents[0]].tree);
+    // new commit whose tree = parent's tree (undo the change)
+    const parent=headCommitId(r);
+    const nid=makeCommit(r,[parent], before, 'Revert: undo "'+c.message+'"');
+    r.branches[r.HEAD.branch]=nid;
+    r.work=clone(before); r.index=clone(before);
+    logCmd('git revert '+id, 'Created revert save point '+nid);
+    toast('Reverted! The mistake is undone.');
+  }
+
+  function doMerge(name){
+    const r=G.repo;
+    if(!(name in r.branches)){ toast('No timeline named '+name,true); return; }
+    if(!r.HEAD.branch){ toast('Switch to a branch before merging.',true); return; }
+    const ours=headCommitId(r), theirs=r.branches[name];
+    if(isAncestor(r, theirs, ours)){ toast('Already up to date.'); logCmd('git merge '+name,'Already up to date.'); return; }
+    if(isAncestor(r, ours, theirs)){
+      // fast-forward
+      r.branches[r.HEAD.branch]=theirs; const h=headTree(r); r.work=clone(h); r.index=clone(h);
+      logCmd('git merge '+name, 'Fast-forward. '+r.HEAD.branch+' -> '+name);
+      toast('Merged (fast-forward)!'); refresh(); return;
+    }
+    const base=mergeBase(r, ours, theirs);
+    const bT=base?r.commits[base].tree:{}, oT=r.commits[ours].tree, tT=r.commits[theirs].tree;
+    const merged={}, conflicts=[];
+    const keys=new Set([...Object.keys(oT),...Object.keys(tT),...Object.keys(bT)]);
+    keys.forEach(k=>{
+      const b=bT[k], o=oT[k], t=tT[k];
+      if(o===t){ merged[k]=o; }
+      else if(o===b){ merged[k]=t; }
+      else if(t===b){ merged[k]=o; }
+      else { conflicts.push({knob:k, ours:o, theirs:t}); merged[k]=o; }
+    });
+    if(!conflicts.length){
+      const nid=makeCommit(r,[ours,theirs], merged, "Merge '"+name+"'");
+      r.branches[r.HEAD.branch]=nid; r.work=clone(merged); r.index=clone(merged);
+      logCmd('git merge '+name, 'Merge made by the recursive strategy.');
+      toast('Merged cleanly!'); refresh(); return;
+    }
+    // conflict path
+    logCmd('git merge '+name, 'CONFLICT: '+conflicts.map(c=>FILE_OF[c.knob]||c.knob).join(', '));
+    G.pendingConflict={ name, ours, theirs, merged, conflicts, choices:{} };
+    openConflict();
+  }
+
+  /* ============================================================
+     REMOTE ENGINE  (World 3 — the "Cloud Mirror" / origin)
+     A remote is just another little timeline-store that other travelers can
+     also reach. We copy commits across by id (ids are globally unique within a
+     play session) so push/fetch never lose lineage.
+     ============================================================ */
+
+  /* copy a commit + all of its missing ancestors from `from` store into `to`. */
+  function copyHistory(fromCommits, toCommits, tip){
+    if(!tip) return;
+    const stack=[tip];
+    while(stack.length){
+      const id=stack.pop();
+      if(!id || toCommits[id] || !fromCommits[id]) continue;
+      toCommits[id]=clone(fromCommits[id]);
+      fromCommits[id].parents.forEach(p=>stack.push(p));
+    }
+  }
+
+  /* ensure a remote exists (lazily); origin starts empty until first push. */
+  function ensureRemote(r){
+    if(!r.remote) r.remote={ branches:{}, commits:{} };
+    return r.remote;
+  }
+
+  /* PUSH (pure core) — send current branch up to origin.
+     Returns {ok, status, branch, reason}. status: 'ok' | 'uptodate' | 'rejected' | 'nobranch' | 'noremote'. */
+  function doPushCore(r){
+    if(!r.remote) return { ok:false, status:'noremote' };
+    if(!r.HEAD.branch) return { ok:false, status:'nobranch' };
+    const branch=r.HEAD.branch;
+    const localTip=r.branches[branch];
+    const remoteTip=r.remote.branches[branch];
+    if(remoteTip===localTip) return { ok:true, status:'uptodate', branch };
+    // reject a non-fast-forward push: origin has work we don't have locally yet.
+    if(remoteTip && !isAncestor(r, remoteTip, localTip)){
+      return { ok:false, status:'rejected', branch, reason:'remote has commits you do not have — pull first' };
+    }
+    copyHistory(r.commits, r.remote.commits, localTip);
+    r.remote.branches[branch]=localTip;
+    r.remoteTracking['origin/'+branch]=localTip;
+    return { ok:true, status:'ok', branch };
+  }
+
+  /* FETCH (pure core) — pull origin's commits into our store + update tracking
+     refs, WITHOUT moving any local branch. Returns {ok, updated[]}. */
+  function doFetchCore(r){
+    if(!r.remote) return { ok:false, status:'noremote' };
+    const updated=[];
+    Object.keys(r.remote.branches).forEach(bn=>{
+      const tip=r.remote.branches[bn];
+      copyHistory(r.remote.commits, r.commits, tip);
+      if(r.remoteTracking['origin/'+bn]!==tip){ updated.push(bn); }
+      r.remoteTracking['origin/'+bn]=tip;
+    });
+    return { ok:true, status:'ok', updated };
+  }
+
+  /* PULL (pure core) — fetch, then integrate origin/<branch> into the current
+     branch. Returns a descriptor the UI acts on:
+       {status:'uptodate'|'ff'|'merged'|'conflict'|...}
+     For 'conflict', returns the same shape doMerge builds so the existing
+     paradox overlay can finish the job. */
+  function doPullCore(r){
+    if(!r.remote) return { ok:false, status:'noremote' };
+    if(!r.HEAD.branch) return { ok:false, status:'nobranch' };
+    doFetchCore(r);
+    const branch=r.HEAD.branch;
+    const ours=r.branches[branch];
+    const theirs=r.remoteTracking['origin/'+branch];
+    if(!theirs) return { ok:true, status:'noupstream', branch };
+    if(theirs===ours || isAncestor(r, theirs, ours)) return { ok:true, status:'uptodate', branch };
+    if(isAncestor(r, ours, theirs)){
+      // fast-forward: just slide our branch up to origin's tip.
+      r.branches[branch]=theirs;
+      return { ok:true, status:'ff', branch, theirs };
+    }
+    // diverged — real 3-way merge against origin/<branch> (same logic as doMerge).
+    const base=mergeBase(r, ours, theirs);
+    const bT=base?r.commits[base].tree:{}, oT=r.commits[ours].tree, tT=r.commits[theirs].tree;
+    const merged={}, conflicts=[];
+    const keys=new Set([...Object.keys(oT),...Object.keys(tT),...Object.keys(bT)]);
+    keys.forEach(k=>{
+      const b=bT[k], o=oT[k], t=tT[k];
+      if(o===t){ merged[k]=o; }
+      else if(o===b){ merged[k]=t; }
+      else if(t===b){ merged[k]=o; }
+      else { conflicts.push({knob:k, ours:o, theirs:t}); merged[k]=o; }
+    });
+    if(!conflicts.length){
+      const nid=makeCommit(r,[ours,theirs], merged, "Merge origin/"+branch);
+      r.branches[branch]=nid;
+      return { ok:true, status:'merged', branch, id:nid, merged };
+    }
+    return { ok:true, status:'conflict', branch, ours, theirs, merged, conflicts };
+  }
+
+  /* ---- UI wrappers (buttons + terminal share these) ---- */
+  function doConnectRemote(){
+    const r=G.repo;
+    if(r.remote){ toast('Cloud Mirror already connected.',true); return; }
+    ensureRemote(r);
+    logCmd('git remote add origin <cloud-mirror>', "Connected the Cloud Mirror as 'origin'.");
+    toast('Cloud Mirror connected as origin.');
+  }
+  function doPush(){
+    const r=G.repo;
+    if(!r.remote){ toast('No Cloud Mirror yet — connect one first.',true); return; }
+    const res=doPushCore(r);
+    if(res.status==='uptodate'){ logCmd('git push','Everything up-to-date.'); toast('Already up to date.'); return; }
+    if(res.status==='nobranch'){ toast("You're in the past (detached). Switch to a branch first.",true); return; }
+    if(res.status==='rejected'){
+      logCmd('git push', '! [rejected] '+res.branch+' (non-fast-forward)\nhint: pull the Cloud Mirror first, then push.');
+      toast('Push rejected — teammate is ahead. Pull first!',true); return;
+    }
+    logCmd('git push -u origin '+res.branch, "To origin\n   "+res.branch+" -> "+res.branch);
+    toast('Pushed to the Cloud Mirror!');
+  }
+  function doFetch(){
+    const r=G.repo;
+    if(!r.remote){ toast('No Cloud Mirror to fetch from.',true); return; }
+    const res=doFetchCore(r);
+    G.flags.didFetch=true;
+    logCmd('git fetch', res.updated.length?('Fetched: '+res.updated.map(b=>'origin/'+b).join(', ')):'Already up to date.');
+    toast(res.updated.length?'Fetched new save points from the Mirror.':'Nothing new to fetch.');
+  }
+  function doPull(){
+    const r=G.repo;
+    if(!r.remote){ toast('No Cloud Mirror to pull from.',true); return; }
+    const res=doPullCore(r);
+    if(res.status==='nobranch'){ toast("You're in the past (detached). Switch to a branch first.",true); return; }
+    if(res.status==='noupstream'){ logCmd('git pull','No upstream on the Mirror yet.'); toast('Nothing on the Mirror for this timeline.',true); return; }
+    if(res.status==='uptodate'){ logCmd('git pull','Already up to date.'); toast('Already up to date.'); return; }
+    if(res.status==='ff'){
+      const h=headTree(r); r.work=clone(h); r.index=clone(h);
+      logCmd('git pull', 'Fast-forward. Updated '+res.branch+' to origin/'+res.branch);
+      toast('Pulled (fast-forward) — caught up with the team!'); return;
+    }
+    if(res.status==='merged'){
+      const h=headTree(r); r.work=clone(h); r.index=clone(h);
+      logCmd('git pull', 'Merge made by the recursive strategy. ('+res.id+')');
+      toast('Pulled and merged cleanly!'); return;
+    }
+    if(res.status==='conflict'){
+      // hand off to the existing paradox overlay; "theirs" is origin/<branch>.
+      logCmd('git pull', 'CONFLICT: '+res.conflicts.map(c=>FILE_OF[c.knob]||c.knob).join(', '));
+      G.pendingConflict={ name:'origin/'+res.branch, ours:res.ours, theirs:res.theirs,
+                          merged:res.merged, conflicts:res.conflicts, choices:{} };
+      openConflict();
+    }
+  }
+
+  /* ============================================================
+     UI WIRING
+     ============================================================ */
+  function show(screen){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); $('#'+screen).classList.add('active'); }
+
+  function renderLevels(){
+    const host=$('#levelList'); host.innerHTML='';
+    let curWorld=0;
+    LEVELS.forEach(L=>{
+      if(L.world!==curWorld){ curWorld=L.world; const h=document.createElement('div'); h.className='world-h';
+        h.textContent='WORLD '+L.world+' — '+(L.world===1?'The Basics of Time':L.world===2?'Parallel Timelines':'The Shared World'); host.appendChild(h);
+        const g=document.createElement('div'); g.className='levelgrid'; g.id='wg'+L.world; host.appendChild(g);
+      }
+      const g=$('#wg'+L.world);
+      const locked=L.n>G.progress.max;
+      const card=document.createElement('div'); card.className='levelcard'+(locked?' locked':'');
+      const stars=G.progress.stars[L.n]||0;
+      card.innerHTML='<div class="num">LEVEL '+L.n+'</div><div class="nm">'+L.name+'</div>'+
+        '<div class="stars">'+(locked?'🔒':('★'.repeat(stars)+'☆'.repeat(3-stars)))+'</div>';
+      if(!locked) card.onclick=()=>startLevel(L.n);
+      g.appendChild(card);
+    });
+  }
+
+  function startLevel(n, carried){
+    G.level=n; G.flags={}; G.hintIdx=0; G.pendingConflict=null;
+    clearTimeout(G._winTimer); $('#winOverlay').classList.remove('show');
+    const L=LEVELS[n-1];
+    G.repo=newRepo();
+    // continuity: the garden begins from where you left the previous level
+    // (carried), or from this level's canonical entry state if jumped into.
+    const base = carried ? clone(carried) : clone(L.enter);
+    L.setup(G.repo, base);
+    $('#cmdLog').innerHTML='';
+    $('#gameTitle').textContent='LVL '+n+' — '+L.name;
+    // quest text
+    $('#questText').innerHTML=L.intro.map(l=>'<p>'+l+'</p>').join('');
+    // terminal unlock
+    const termOn = L.world>=2;
+    $('#termWrap').style.display = termOn?'flex':'none';
+    $('#termLock').style.display = termOn?'none':'inline';
+    if(termOn) $('#termLock').textContent='';
+    show('screen-game');
+    refresh();
+  }
+
+  function buildEditor(){
+    const L=LEVELS[G.level-1]; const host=$('#editorRows'); host.innerHTML='';
+    if(!L.editable.length){ host.innerHTML='<div style="color:var(--dim);font-size:.85rem">(Nothing to edit in this level — focus on the time controls.)</div>'; return; }
+    L.editable.forEach(k=>{
+      const row=document.createElement('div'); row.className='erow';
+      const lab=document.createElement('span'); lab.className='elabel'; lab.textContent=KNOBS[k].label; row.appendChild(lab);
+      KNOBS[k].values.forEach(v=>{
+        const b=document.createElement('button'); b.className='opt'; b.textContent=v;
+        const cur=G.repo.work[k];
+        if(cur===v) b.classList.add('sel');
+        if(G.repo.work[k]!==G.repo.index[k] && cur===v) b.classList.add('dirty');
+        b.onclick=()=>{ if(!actionAllowed(ACT.edit)) return; G.repo.work[k]=v; G.flags.everEdited=true; logCmd('# edit '+(FILE_OF[k]||k)+' -> '+v); refresh(); };
+        row.appendChild(b);
+      });
+      host.appendChild(row);
+    });
+  }
+
+  function actionAllowed(a){ return LEVELS[G.level-1].actions.includes(a); }
+
+  function buildActions(){
+    const L=LEVELS[G.level-1]; const host=$('#actionBar'); host.innerHTML='';
+    const add=(label,cmd,cls,fn,enabled)=>{
+      const wrap=document.createElement('div'); wrap.className='act';
+      const b=document.createElement('button'); b.className='btn small '+(cls||''); b.innerHTML=label; b.disabled=enabled===false;
+      b.onclick=fn; wrap.appendChild(b);
+      const s=document.createElement('small'); s.textContent=cmd; wrap.appendChild(s);
+      host.appendChild(wrap);
+    };
+    if(actionAllowed(ACT.stage)){
+      add('&#9650; STAGE','git add', '', openStage, unstaged(G.repo).length>0);
+    }
+    if(actionAllowed(ACT.discard)){
+      add('&#10006; DISCARD','git restore','red', openDiscard, unstaged(G.repo).length>0);
+    }
+    if(actionAllowed(ACT.commit)){
+      add('&#11088; SAVE POINT','git commit','gold', ()=>{ gameInput('Name this save point','e.g. planted a tree','', m=>{ if(doCommit(m)){ toast('Save point created!'); refresh(); } }); }, staged(G.repo).length>0);
+    }
+    if(actionAllowed(ACT.travel)){
+      add('&#9203; TIME TRAVEL','git checkout','', openTravel, true);
+    }
+    if(actionAllowed(ACT.revert)){
+      add('&#8634; REVERT','git revert','red', openRevert, true);
+    }
+    if(actionAllowed(ACT.branch)){
+      add('&#8638; BRANCH','git branch','', ()=>{ gameInput('Name the new timeline','e.g. experiment','experiment', n=>{ doBranch(n); refresh(); }); }, true);
+    }
+    if(actionAllowed(ACT.switch)){
+      add('&#8644; SWITCH','git switch','', openSwitch, true);
+    }
+    if(actionAllowed(ACT.merge)){
+      add('&#10515; MERGE','git merge','green', openMerge, true);
+    }
+    /* World 3 — the Cloud Mirror (remote) */
+    if(actionAllowed(ACT.remote)){
+      add('&#9729; CONNECT MIRROR','git remote add','', ()=>{ doConnectRemote(); refresh(); }, !G.repo.remote);
+    }
+    if(actionAllowed(ACT.fetch)){
+      add('&#8615; FETCH','git fetch','', ()=>{ doFetch(); refresh(); }, !!G.repo.remote);
+    }
+    if(actionAllowed(ACT.pull)){
+      add('&#8681; PULL','git pull','green', ()=>{ doPull(); refresh(); }, !!G.repo.remote);
+    }
+    if(actionAllowed(ACT.push)){
+      add('&#8679; PUSH','git push','gold', ()=>{ doPush(); refresh(); }, !!G.repo.remote);
+    }
+  }
+
+  /* game-native picker overlay (replaces window.prompt menus) */
+  function chooser(title, options, onPick, sub){
+    // options: [{label, value, sub?, cls?}]
+    $('#pickerTitle').textContent=title;
+    const subEl=$('#pickerSub');
+    if(sub){ subEl.textContent=sub; subEl.style.display='block'; } else { subEl.style.display='none'; }
+    const list=$('#pickerList'); list.innerHTML='';
+    options.forEach(o=>{
+      const b=document.createElement('button');
+      b.className='picker-opt'+(o.cls?(' '+o.cls):'');
+      b.innerHTML=o.label+(o.sub?('<span class="sub">'+o.sub+'</span>'):'');
+      b.onclick=()=>{ $('#pickerOverlay').classList.remove('show'); onPick(o.value); };
+      list.appendChild(b);
+    });
+    $('#pickerOverlay').classList.add('show');
+  }
+  $('#pickerCancel').onclick=()=>$('#pickerOverlay').classList.remove('show');
+
+  /* game-native text input overlay (replaces window.prompt) */
+  function gameInput(title, placeholder, def, onOk){
+    $('#inputTitle').textContent=title;
+    const f=$('#inputField'); f.placeholder=placeholder||''; f.value=def||'';
+    $('#inputOverlay').classList.add('show');
+    setTimeout(()=>f.focus(),30);
+    const ok=()=>{ const v=f.value.trim(); close(); if(v) onOk(v); };
+    const close=()=>{ $('#inputOverlay').classList.remove('show'); $('#inputOk').onclick=null; f.onkeydown=null; };
+    $('#inputOk').onclick=ok;
+    $('#inputCancel').onclick=close;
+    f.onkeydown=e=>{ if(e.key==='Enter') ok(); else if(e.key==='Escape') close(); };
+  }
+
+  function openStage(){
+    const u=unstaged(G.repo);
+    if(!u.length){ toast('Nothing changed to stage.',true); return; }
+    const opts=u.map(k=>({label:FILE_OF[k]||k, sub:'now: '+G.repo.work[k], value:k}));
+    if(u.length>1) opts.push({label:'⊕ Stage ALL changes', value:'__all__', cls:'all'});
+    chooser('Place on the altar (stage)', opts, (v)=>{
+      if(v==='__all__'){ doStageAll(); logCmd('git add .'); }
+      else { doStageFile(v); logCmd('git add '+(FILE_OF[v]||v)); }
+      toast('Staged.'); refresh();
+    }, 'Staged files go into your next save point.');
+  }
+  function doDiscardFile(f){ const h=headTree(G.repo); G.repo.work[f]=h[f]; G.repo.index[f]=h[f]; }
+  function openDiscard(){
+    const u=unstaged(G.repo);
+    if(!u.length){ toast('No unsaved changes to discard.',true); return; }
+    const opts=u.map(k=>({label:FILE_OF[k]||k, sub:G.repo.work[k]+' → back to '+headTree(G.repo)[k], value:k, cls:'warn'}));
+    if(u.length>1) opts.push({label:'✕ Discard ALL unsaved changes', value:'__all__', cls:'warn'});
+    chooser('Discard unsaved changes', opts, (v)=>{
+      if(v==='__all__'){ u.forEach(doDiscardFile); logCmd('git restore .', 'discarded all unsaved changes'); }
+      else { doDiscardFile(v); logCmd('git restore '+(FILE_OF[v]||v), 'discarded changes to '+(FILE_OF[v]||v)); }
+      toast('Discarded — back to last save.'); refresh();
+    }, 'This throws the change away. It cannot be undone.');
+  }
+  function openTravel(){
+    const r=G.repo; const ids=Object.keys(r.commits).sort((a,b)=>r.commits[b].n-r.commits[a].n);
+    const cur=headCommitId(r);
+    const opts=ids.map(id=>({label:r.commits[id].message, sub:id+(id===cur?'  •  you are here':''), value:id}));
+    opts.unshift({label:'⏭ Return to NOW (latest)', value:'__now__', cls:'all'});
+    chooser('Travel to which moment?', opts, (v)=>{ if(v==='__now__') doReturnNow(); else doTravelTo(v); toast('Time shift!'); refresh(); }, 'Visiting the past never destroys anything.');
+  }
+  function openRevert(){
+    const r=G.repo; const ids=Object.keys(r.commits).filter(id=>r.commits[id].parents.length===1).sort((a,b)=>r.commits[b].n-r.commits[a].n);
+    const opts=ids.map(id=>({label:r.commits[id].message, sub:id, value:id}));
+    chooser('Undo which save point?', opts, (v)=>{ doRevert(v); refresh(); }, 'Revert adds a NEW save point that cancels the chosen one.');
+  }
+  function openSwitch(){
+    const r=G.repo; const cur=r.HEAD.branch;
+    const opts=Object.keys(r.branches).map(b=>({label:b+(b===cur?'  •  current':''), sub:'tip: '+(r.commits[r.branches[b]]||{}).message, value:b, cls:b===cur?'all':''}));
+    chooser('Switch to which timeline?', opts, (v)=>{ doSwitch(v); refresh(); });
+  }
+  function openMerge(){
+    const r=G.repo; const opts=Object.keys(r.branches).filter(b=>b!==r.HEAD.branch).map(b=>({label:b, sub:'tip: '+(r.commits[r.branches[b]]||{}).message, value:b}));
+    if(!opts.length){ toast('No other timeline to merge.',true); return; }
+    chooser('Merge which timeline into '+(r.HEAD.branch||'?')+'?', opts, (v)=>{ doMerge(v); refresh(); }, 'Brings that timeline’s changes into your current one.');
+  }
+
+  /* conflict overlay */
+  function openConflict(){
+    const pc=G.pendingConflict; const body=$('#conflictBody'); body.innerHTML='';
+    pc.conflicts.forEach((c,i)=>{
+      const box=document.createElement('div'); box.className='cf';
+      box.innerHTML='<div style="font-size:.9rem;color:var(--ink)">Clash on <b>'+(FILE_OF[c.knob]||c.knob)+'</b>:</div>';
+      [['ours (main): '+c.ours, c.ours],['theirs ('+pc.name+'): '+c.theirs, c.theirs]].forEach(([lbl,val])=>{
+        const b=document.createElement('button'); b.className='opt btn small'; b.textContent=lbl;
+        b.onclick=()=>{ pc.choices[c.knob]=val; box.querySelectorAll('.opt').forEach(x=>x.classList.remove('green')); b.classList.add('green');
+          if(Object.keys(pc.choices).length===pc.conflicts.length) $('#conflictResolve').disabled=false; };
+        box.appendChild(b);
+      });
+      body.appendChild(box);
+    });
+    $('#conflictResolve').disabled=true;
+    $('#conflictOverlay').classList.add('show');
+  }
+  $('#conflictResolve').onclick=()=>{
+    const r=G.repo, pc=G.pendingConflict;
+    const merged=clone(pc.merged);
+    pc.conflicts.forEach(c=>{ merged[c.knob]=pc.choices[c.knob]; });
+    const nid=makeCommit(r,[pc.ours,pc.theirs], merged, "Merge '"+pc.name+"' (resolved)");
+    r.branches[r.HEAD.branch]=nid; r.work=clone(merged); r.index=clone(merged);
+    logCmd('git commit (merge)', 'Paradox resolved. Merge save point '+nid+' created.');
+    G.pendingConflict=null; $('#conflictOverlay').classList.remove('show');
+    toast('Paradox resolved!'); refresh();
+  };
+
+  /* terminal parser (Hybrid) */
+  function runTerminal(line){
+    line=line.trim(); if(!line) return;
+    const r=G.repo;
+    const m=line.match(/^git\s+(\w+)\s*(.*)$/);
+    if(!m){ logCmd(line,'not a git command'); return; }
+    const cmd=m[1], rest=m[2].trim();
+    try{
+      if(cmd==='add'){
+        if(rest==='.'||rest==='-A'||rest==='--all'){ doStageAll(); logCmd(line,'staged all'); }
+        else { const knob=Object.keys(FILE_OF).find(k=>FILE_OF[k]===rest||k===rest); if(knob){ doStageFile(knob); logCmd(line,'staged '+rest); } else { toast('Unknown file: '+rest,true); logCmd(line,'no such file'); } }
+      } else if(cmd==='commit'){
+        const mm=rest.match(/-m\s+["']?(.+?)["']?$/); doCommit(mm?mm[1]:'save point');
+      } else if(cmd==='branch'){
+        if(rest) doBranch(rest); else logCmd(line, Object.keys(r.branches).join('\n'));
+      } else if(cmd==='switch'||cmd==='checkout'){
+        const name=rest.replace(/^-c\s+/,''); if(rest.startsWith('-c')){ doBranch(name); doSwitch(name); }
+        else if(name in r.branches) doSwitch(name);
+        else if(r.commits[name]) doTravelTo(name);
+        else { toast('Unknown target: '+name,true); }
+      } else if(cmd==='merge'){ doMerge(rest);
+      } else if(cmd==='revert'){ doRevert(rest);
+      } else if(cmd==='remote'){
+        // git remote add origin <url>  (any 'add origin ...' connects the Mirror)
+        if(/^add\s+origin/.test(rest)) doConnectRemote();
+        else if(!rest||rest==='-v'){ logCmd(line, r.remote?'origin  (the Cloud Mirror)':'(no remote connected)'); }
+        else { toast('Only "git remote add origin ..." is supported.',true); logCmd(line,'unsupported remote command'); }
+      } else if(cmd==='clone'){
+        // we don't model cloning from scratch; treat as connect-the-mirror for parity.
+        doConnectRemote();
+      } else if(cmd==='push'){ doPush();
+      } else if(cmd==='fetch'){ doFetch();
+      } else if(cmd==='pull'){ doPull();
+      } else if(cmd==='status'){ logCmd(line, 'staged: '+(staged(r).map(k=>FILE_OF[k]).join(', ')||'none')+'\nmodified: '+(unstaged(r).map(k=>FILE_OF[k]).join(', ')||'none')+'\non: '+(r.HEAD.branch||'(past)'));
+      } else if(cmd==='log'){ const ids=Object.keys(r.commits).sort((a,b)=>r.commits[b].n-r.commits[a].n); logCmd(line, ids.map(id=>id+' '+r.commits[id].message).join('\n')||'no commits');
+      } else { logCmd(line,'command not supported in this game'); }
+    }catch(e){ logCmd(line,'error: '+e.message); }
+    refresh();
+  }
+
+  /* ---------- status + goals + win ---------- */
+  function renderStatus(){
+    const r=G.repo, host=$('#statusFiles'); host.innerHTML='';
+    const h=headTree(r);
+    const where = r.HEAD.branch ? ('on timeline: '+r.HEAD.branch) : 'visiting the past (detached)';
+    const w=document.createElement('div'); w.className='f';
+    w.innerHTML='<span style="color:var(--gold)">&#9654; '+where+'</span>';
+    host.appendChild(w);
+
+    const stagedF=[], modF=[], cleanF=[];
+    Object.keys(KNOBS).forEach(k=>{
+      const isStaged = r.index[k]!==h[k];   // differs from last save point
+      const isMod    = r.work[k]!==r.index[k]; // working edit not yet staged
+      if(isStaged) stagedF.push(k);
+      if(isMod)    modF.push(k);
+      if(!isStaged && !isMod) cleanF.push(k);
+    });
+
+    function group(title, cls, files, valFn, alwaysShow){
+      if(!files.length && !alwaysShow) return;
+      const head=document.createElement('div');
+      head.className=cls;
+      head.style.cssText='font-size:.74rem;letter-spacing:.5px;margin:.55rem 0 .2rem;font-weight:700;';
+      head.textContent=title;
+      host.appendChild(head);
+      if(!files.length){ const e=document.createElement('div'); e.className='f clean'; e.style.opacity='.7'; e.style.fontStyle='italic';
+        e.innerHTML='<span>&mdash; nothing yet &mdash;</span><span></span>'; host.appendChild(e); return; }
+      files.forEach(k=>{ const d=document.createElement('div'); d.className='f';
+        d.innerHTML='<span>'+FILE_OF[k]+'</span><span class="'+cls+'">'+valFn(k)+'</span>'; host.appendChild(d); });
+    }
+    group('● STAGED — will be in your next save point', 'staged', stagedF, k=>r.index[k], true);
+    group('✎ MODIFIED — changed, not staged yet',       'mod',    modF,    k=>r.work[k],  true);
+    group('· UNCHANGED — matches last save point',       'clean',  cleanF,  k=>r.work[k],  false);
+  }
+
+  function renderGoals(){
+    const L=LEVELS[G.level-1], host=$('#goalList'); host.innerHTML='';
+    let all=true;
+    L.goals.forEach(g=>{
+      let done=false; try{ done=g.test(G.repo, G.flags); }catch(e){ done=false; }
+      if(!done) all=false;
+      const d=document.createElement('div'); d.className='goal'+(done?' done':'');
+      d.innerHTML='<span class="bx">'+(done?'☑':'☐')+'</span><span>'+g.label+'</span>';
+      host.appendChild(d);
+    });
+    return all;
+  }
+
+  function refresh(){
+    drawScene($('#sceneCanvas'), G.repo.HEAD.branch?G.repo.work:G.repo.work);
+    $('#sceneLabel').innerHTML = G.repo.HEAD.branch
+      ? 'Working Directory &mdash; your world right now'
+      : 'Working Directory &mdash; <span style="color:var(--gold)">a past moment</span>';
+    drawGraph($('#graphCanvas'), G.repo);
+    buildEditor(); buildActions(); renderStatus();
+    const won=renderGoals();
+    if(won && !G.flags._won){ G.flags._won=true; onWin(); }
+  }
+
+  function onWin(){
+    const L=LEVELS[G.level-1];
+    // continuity: remember the garden as it stands on the main timeline so the
+    // next level can pick up exactly where this one left off.
+    const r=G.repo;
+    G.saga = r.branches.main ? clone(r.commits[r.branches.main].tree) : clone(r.work);
+    // stars: 3 if no hint used, 2 if 1 hint, else 1
+    const stars = G.hintIdx===0?3 : (G.hintIdx<=1?2:1);
+    G.progress.stars[L.n]=Math.max(G.progress.stars[L.n]||0, stars);
+    G.progress.max=Math.max(G.progress.max, Math.min(LEVELS.length, L.n+1));
+    saveProgress();
+    $('#winStars').innerHTML='★'.repeat(stars)+'☆'.repeat(3-stars);
+    $('#winTitle').textContent = L.n===LEVELS.length?'YOU ARE GIT-FLUENT!':'TIMELINE SECURED!';
+    $('#winMsg').innerHTML=L.done;
+    $('#nextBtn').style.display = (L.n<LEVELS.length)?'inline-block':'none';
+    // Don't slam the win screen up instantly — the player just changed the
+    // timeline (a new save point, HEAD jumping to it). Let them SEE that on the
+    // Timeline first, point at it, then reveal the win screen.
+    toast('✓ Goal complete! See the new save point &amp; where HEAD moved on the Timeline…');
+    clearTimeout(G._winTimer);
+    G._winTimer=setTimeout(()=>{ $('#winOverlay').classList.add('show'); }, 1800);
+  }
+
+  /* ---------- glossary ---------- */
+  const GLOSSARY=[
+    ['Repository (repo)','Your whole project plus its entire history of save points. In the game, your pixel world.'],
+    ['Working directory','The files as they are right NOW — the world you can edit before saving.'],
+    ['Commit (save point)','A permanent snapshot of everything, with a name. You can always return to it.'],
+    ['Staging area (altar)','A waiting area where you choose exactly which changes go into the next save point.'],
+    ['HEAD','A marker for "where you are right now" in the history.'],
+    ['Branch (timeline)','A parallel line of save points. Lets you try things without touching your main work.'],
+    ['main','The default, primary timeline.'],
+    ['Switch / checkout','Move yourself onto a different timeline or back to a past moment.'],
+    ['Merge','Combine another timeline’s changes into your current one.'],
+    ['Merge conflict (paradox)','When two timelines changed the SAME thing differently and git needs you to choose.'],
+    ['Revert','A safe undo: a NEW save point that cancels out an earlier one, without erasing history.'],
+    ['Fast-forward','A merge so simple git just slides the marker forward — no real combining needed.'],
+    ['Remote (Cloud Mirror)','A shared copy of your timelines that lives elsewhere so a whole team can reach it.'],
+    ['origin','The usual name for your main remote — the Cloud Mirror you push to and pull from.'],
+    ['origin/main','A read-only marker showing where the remote’s main was last time you talked to it.'],
+    ['Push','Upload your local save points to the remote so teammates can see them.'],
+    ['Fetch','Download what’s new on the remote WITHOUT changing your own work — just a peek.'],
+    ['Pull','Fetch AND merge it in — a fast-forward when you’re behind, a real merge when you both changed things.'],
+    ['Upstream','The remote branch your local branch is paired with (e.g. main tracks origin/main).'],
+    ['Non-fast-forward','A push the remote rejects because it has work you don’t — pull first, then push.'],
+  ];
+  function openGlossary(){ const host=$('#glosList'); host.innerHTML=''; GLOSSARY.forEach(([t,d])=>{ const dt=document.createElement('dt'); dt.textContent=t; const dd=document.createElement('dd'); dd.textContent=d; host.appendChild(dt); host.appendChild(dd); }); $('#glosOverlay').classList.add('show'); }
+
+  /* ---------- events ---------- */
+  $('#startBtn').onclick=()=>{ renderLevels(); show('screen-levels'); };
+  $('#backTitle').onclick=()=>show('screen-title');
+  $('#toLevels').onclick=()=>{ renderLevels(); show('screen-levels'); };
+  $('#winLevels').onclick=()=>{ $('#winOverlay').classList.remove('show'); renderLevels(); show('screen-levels'); };
+  $('#nextBtn').onclick=()=>{ $('#winOverlay').classList.remove('show'); if(G.level<LEVELS.length) startLevel(G.level+1, G.saga); };
+  $('#resetBtn').onclick=()=>startLevel(G.level);
+  $('#hintBtn').onclick=()=>{ const L=LEVELS[G.level-1]; const h=L.hints[Math.min(G.hintIdx,L.hints.length-1)]; toast('HINT: '+h); G.hintIdx++; };
+  $('#glosBtn1').onclick=openGlossary; $('#glosBtn2').onclick=openGlossary; $('#glosClose').onclick=()=>$('#glosOverlay').classList.remove('show');
+  $('#termRun').onclick=()=>{ const v=$('#termInput').value; $('#termInput').value=''; runTerminal(v); };
+  $('#termInput').addEventListener('keydown',e=>{ if(e.key==='Enter'){ const v=e.target.value; e.target.value=''; runTerminal(v); } });
+
+  drawTitle();
+})();
+</script>
+</body>
+</html>
