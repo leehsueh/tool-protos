@@ -1,0 +1,2218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Upload a .3mf file, pick up to four Bambu Lab PLA filament colors, and preview every way of coloring the model.">
+  <meta name="date" content="2026-05-20">
+  <meta name="tags" content="3d, 3mf, webgl, viewer, bambulab, multicolor, filament">
+  <title>3MF Multicolor Viewer</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+      padding: 1rem;
+    }
+    nav { margin-bottom: 1rem; }
+    nav a { color: #58a6ff; text-decoration: none; font-size: 0.875rem; }
+    nav a:hover { text-decoration: underline; }
+
+    details {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+      max-width: 1100px;
+    }
+    summary { cursor: pointer; font-weight: 600; color: #8b949e; font-size: 0.875rem; user-select: none; list-style: none; }
+    summary::before { content: '▶ '; font-size: 0.7em; }
+    details[open] summary::before { content: '▼ '; }
+    .docs { margin-top: 1rem; color: #8b949e; font-size: 0.9rem; line-height: 1.7; }
+    .docs h2 { color: #c9d1d9; font-size: 0.875rem; font-weight: 600; margin: 1rem 0 0.25rem; text-transform: uppercase; letter-spacing: 0.06em; }
+    .docs h2:first-child { margin-top: 0; }
+    .docs p + p { margin-top: 0.5rem; }
+    .docs code { background: #0d1117; border: 1px solid #30363d; border-radius: 3px; padding: 0.1em 0.35em; font-family: monospace; font-size: 0.85em; color: #79c0ff; }
+
+    main { max-width: 1100px; }
+    h1 { font-size: 1.4rem; font-weight: 700; color: #f0f6fc; margin-bottom: 1.25rem; }
+    .section-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin: 1.4rem 0 0.65rem;
+      display: flex;
+      align-items: baseline;
+      gap: 0.6rem;
+    }
+    .section-title .muted {
+      color: #484f58;
+      font-weight: 500;
+      font-size: 0.75rem;
+      letter-spacing: 0;
+      text-transform: none;
+    }
+
+    #error-msg {
+      background: #2d1b1b;
+      border: 1px solid #f85149;
+      border-radius: 6px;
+      color: #f85149;
+      padding: 0.65rem 1rem;
+      margin-bottom: 1rem;
+      font-size: 0.875rem;
+    }
+
+    #drop-zone {
+      width: 100%;
+      height: 280px;
+      border: 2px dashed #30363d;
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: #8b949e;
+      font-size: 1rem;
+      transition: border-color 0.2s, background 0.2s, color 0.2s;
+      text-align: center;
+      padding: 2rem;
+      gap: 0.6rem;
+      user-select: none;
+    }
+    #drop-zone:hover, #drop-zone.drag-over {
+      border-color: #58a6ff;
+      background: #161b22;
+      color: #58a6ff;
+    }
+    #drop-zone .drop-icon { opacity: 0.5; transition: opacity 0.2s; }
+    #drop-zone:hover .drop-icon, #drop-zone.drag-over .drop-icon { opacity: 0.85; }
+    #drop-zone .drop-hint { font-size: 0.8rem; color: #484f58; }
+
+    .viewer-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+    .filename-label {
+      font-size: 0.875rem;
+      color: #8b949e;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    button.btn {
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #c9d1d9;
+      cursor: pointer;
+      font-size: 0.8rem;
+      padding: 0.35rem 0.75rem;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+      white-space: nowrap;
+      font-family: inherit;
+    }
+    button.btn:hover { background: #30363d; border-color: #58a6ff; color: #f0f6fc; }
+    button.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .viewer-layout {
+      display: flex;
+      gap: 1rem;
+      align-items: flex-start;
+      isolation: isolate;
+    }
+
+    #canvas {
+      width: 100%;
+      height: 500px;
+      border-radius: 8px;
+      border: 1px solid #30363d;
+      background: #080c14;
+      cursor: grab;
+      display: block;
+      touch-action: none;
+    }
+    #canvas:active { cursor: grabbing; }
+
+    #info-panel {
+      flex: 0 0 260px;
+      max-height: 500px;
+      overflow-y: auto;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 1rem;
+      font-size: 0.85rem;
+      position: relative;
+      z-index: 1;
+    }
+    .info-section { margin-bottom: 1rem; }
+    .info-section:last-child { margin-bottom: 0; }
+    .info-section-title {
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 0.5rem;
+    }
+    .info-table { width: 100%; border-collapse: collapse; }
+    .info-table td { padding: 0.22rem 0; vertical-align: top; line-height: 1.4; }
+    .info-table td.k { color: #8b949e; width: 46%; padding-right: 0.4rem; font-size: 0.8rem; }
+    .info-table td.v { color: #e6edf3; word-break: break-word; }
+    .info-divider { border: none; border-top: 1px solid #30363d; margin: 0.65rem 0; }
+
+    .canvas-hint { font-size: 0.73rem; color: #30363d; margin-top: 0.35rem; text-align: center; }
+
+
+    /* ===== Color picker ===== */
+    .color-palette {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(54px, 1fr));
+      gap: 8px;
+      margin-bottom: 0.75rem;
+    }
+    .color-swatch {
+      position: relative;
+      aspect-ratio: 1;
+      border-radius: 8px;
+      border: 2px solid #30363d;
+      cursor: pointer;
+      transition: transform 0.12s, border-color 0.12s, box-shadow 0.12s;
+      overflow: hidden;
+    }
+    .color-swatch::after {
+      content: '';
+      position: absolute; inset: 0;
+      box-shadow: inset 0 -10px 12px -8px rgba(0,0,0,0.45),
+                  inset 0 8px 10px -8px rgba(255,255,255,0.18);
+      border-radius: inherit;
+      pointer-events: none;
+    }
+    .color-swatch:hover { transform: translateY(-1px); border-color: #58a6ff; }
+    .color-swatch.selected {
+      border-color: #58a6ff;
+      box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.35);
+    }
+    .color-swatch.disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+    .color-swatch .check {
+      position: absolute;
+      top: 4px; right: 4px;
+      width: 16px; height: 16px;
+      background: #58a6ff;
+      color: #0d1117;
+      border-radius: 50%;
+      font-size: 0.7rem;
+      font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.35);
+      z-index: 1;
+    }
+    .color-swatch .swatch-label {
+      position: absolute;
+      bottom: 3px; left: 4px; right: 4px;
+      font-size: 0.6rem;
+      color: rgba(255,255,255,0.92);
+      text-align: center;
+      line-height: 1;
+      text-shadow: 0 1px 1px rgba(0,0,0,0.7);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      pointer-events: none;
+      z-index: 1;
+    }
+    .color-swatch.light .swatch-label { color: rgba(0,0,0,0.75); text-shadow: 0 1px 1px rgba(255,255,255,0.5); }
+
+    .selected-strip {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 0.5rem;
+      min-height: 32px;
+    }
+    .selected-chip {
+      height: 30px;
+      border-radius: 999px;
+      border: 1px solid #30363d;
+      background: #161b22;
+      padding: 0 4px 0 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #c9d1d9;
+      font-size: 0.78rem;
+    }
+    .selected-chip .swatch {
+      width: 16px; height: 16px; border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+    .selected-chip .close {
+      cursor: pointer;
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: #8b949e;
+      font-size: 0.9rem;
+      line-height: 1;
+    }
+    .selected-chip .close:hover { background: #30363d; color: #f0f6fc; }
+    .selected-empty {
+      color: #484f58; font-size: 0.8rem; align-self: center;
+    }
+
+    /* ===== Thumbnails ===== */
+    .combo-message {
+      color: #8b949e;
+      font-size: 0.8rem;
+      margin-bottom: 0.75rem;
+    }
+    .thumbnails {
+      display: block;
+    }
+    .instance-combos { margin-bottom: 1.25rem; }
+    .instance-combos > summary {
+      cursor: pointer; list-style: none;
+      padding: 0.4rem 0; border-bottom: 1px solid #21262d;
+      font-size: 0.85rem; font-weight: 600; color: #e6edf3;
+      display: flex; align-items: center; gap: 0.4rem;
+    }
+    .instance-combos > summary::-webkit-details-marker { display: none; }
+    .instance-combos > summary::before {
+      content: '▾'; font-size: 0.7rem; color: #8b949e; transition: transform 0.15s;
+    }
+    .instance-combos:not([open]) > summary::before { transform: rotate(-90deg); }
+    .instance-combos > .thumbs-grid { margin-top: 0.5rem; }
+    .instance-combos-heading {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #e6edf3;
+      margin-bottom: 0.4rem;
+      padding-bottom: 0.3rem;
+      border-bottom: 1px solid #21262d;
+    }
+    .thumbs-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 12px;
+    }
+    .thumb {
+      background: #080c14;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 6px;
+      cursor: pointer;
+      transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .thumb:hover {
+      border-color: #58a6ff;
+      transform: translateY(-1px);
+    }
+    .thumb.active {
+      border-color: #58a6ff;
+      box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.3);
+    }
+    .thumb img, .thumb canvas {
+      width: 100%;
+      aspect-ratio: 1;
+      display: block;
+      border-radius: 5px;
+      background: #080c14;
+    }
+    .thumb .labels {
+      display: flex;
+      gap: 4px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .thumb .labels .dot {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.18);
+    }
+
+    .saved-section { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid #21262d; }
+    .saved-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; }
+    .saved-title { font-size: 0.85rem; font-weight: 600; color: #e6edf3; }
+    .saved-empty { font-size: 0.8rem; padding: 0.5rem 0; }
+    .saved-strip { display: flex; gap: 0.5rem; overflow-x: auto; padding-bottom: 0.25rem; }
+    .saved-card { flex: 0 0 110px; background: #161b22; border: 1px solid #30363d; border-radius: 6px; overflow: hidden; cursor: pointer; transition: border-color 0.1s; }
+    .saved-card:hover { border-color: #58a6ff; }
+    .saved-card.active { border-color: #58a6ff; box-shadow: 0 0 0 1px #58a6ff; }
+    .saved-card img { display: block; width: 100%; height: 110px; object-fit: cover; background: #0d1117; }
+    .saved-card-footer { display: flex; align-items: center; justify-content: space-between; padding: 0.3rem 0.4rem; gap: 0.25rem; }
+    .saved-card-name { font-size: 0.75rem; color: #e6edf3; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+    .saved-card-del {
+      background: transparent; border: none; color: #8b949e; cursor: pointer; padding: 0 0.25rem;
+      font-size: 0.85rem; line-height: 1; border-radius: 3px;
+    }
+    .saved-card-del:hover { background: #30363d; color: #f85149; }
+    .action-btn {
+      background: #238636; border: 1px solid #2ea043; color: #ffffff;
+      padding: 0.3rem 0.7rem; border-radius: 5px; cursor: pointer; font: inherit; font-size: 0.8rem;
+    }
+    .action-btn:hover { background: #2ea043; }
+
+    @media (max-width: 860px) {
+      .viewer-layout { flex-direction: column; }
+      #canvas { height: 340px; }
+      #info-panel { flex: none; width: 100%; max-height: 280px; }
+    }
+
+    .plate-tabs {
+      display: flex;
+      gap: 0.25rem;
+      padding: 0.25rem 0;
+      margin-bottom: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .plate-tab {
+      background: #161b22;
+      border: 1px solid #30363d;
+      color: #e6edf3;
+      padding: 0.35rem 0.75rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-family: inherit;
+    }
+    .plate-tab.active { border-color: #58a6ff; background: #1f2933; }
+    .plate-tab:hover  { background: #1f2933; }
+    .part-group { margin-bottom: 0.5rem; }
+    .part-group summary { cursor: pointer; padding: 0.25rem 0; font-weight: 500; }
+    .part-group .part-list { list-style: none; padding-left: 1rem; font-size: 0.85rem; }
+    .part-group .part-list li { display: flex; justify-content: space-between; padding: 0.15rem 0; gap: 0.5rem; }
+    .part-group .color-name { color: #8b949e; font-size: 0.75rem; display: flex; align-items: center; }
+    .part-group .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .color-dot { display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 50%; margin-right: 0.35rem; vertical-align: middle; border: 1px solid #30363d; }
+    .muted { opacity: 0.6; }
+
+    .action-bar { display: flex; gap: 0.5rem; align-items: center; padding: 0.5rem 0; flex-wrap: wrap; }
+    .action-bar button {
+      background: #21262d; border: 1px solid #30363d; color: #e6edf3;
+      padding: 0.25rem 0.65rem; border-radius: 5px; cursor: pointer; font: inherit; font-size: 0.8rem;
+    }
+    .action-bar button:hover:not(:disabled) { background: #30363d; }
+    .action-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .part-group .part-list li { gap: 0.5rem; }
+    .part-group .part-list li input[type=checkbox] { margin: 0; cursor: pointer; flex-shrink: 0; }
+    .part-group .part-list li.in-group { border-left: 3px solid var(--group-color, #30363d); padding-left: 0.5rem; margin-left: -0.5rem; }
+
+    .meta-html { line-height: 1.4; font-size: 0.85rem; max-width: 100%; overflow-wrap: anywhere; }
+    .meta-html h1, .meta-html h2, .meta-html h3, .meta-html h4 { margin: 0.5rem 0 0.25rem; line-height: 1.2; }
+    .meta-html p { margin: 0.25rem 0; }
+    .meta-html a { color: #58a6ff; }
+    .meta-html table { border-collapse: collapse; }
+    .meta-html img { max-width: 100%; height: auto; }
+    .meta-html ul, .meta-html ol { padding-left: 1.25rem; margin: 0.25rem 0; }
+  </style>
+</head>
+<body>
+  <nav><a href="../index.html">← Back to experiments</a></nav>
+
+  <details>
+    <summary>How this works</summary>
+    <div class="docs">
+      <h2>About</h2>
+      <p>Loads a <code>.3mf</code> file entirely in the browser (nothing is uploaded), splits it into its constituent parts, and lets you preview the model in every combination of up to four <em>Bambu Lab PLA Basic</em> filament colors.</p>
+
+      <h2>How to use</h2>
+      <p>Drop a <code>.3mf</code> file onto the drop zone (or click to browse). Click swatches in the palette to pick up to four filament colors. The grid below shows every assignment of those colors to the model's parts; click any thumbnail to load it into the big interactive viewer. Drag to orbit, scroll/pinch to zoom.</p>
+
+      <h2>Technical details</h2>
+      <p>The 3MF is a ZIP archive — the Central Directory is located via the <code>PK\x05\x06</code> end record (with ZIP64 fallback) and entries are inflated with <code>DecompressionStream('deflate-raw')</code>. Every <code>.model</code> file in the archive is parsed; each <code>&lt;object&gt;</code> element with geometry becomes a separately colorable "part" (falling back to <code>&lt;mesh&gt;</code>-level splitting when no objects are present).</p>
+      <p>Geometry is centered and scaled once over the combined bounding box so parts stay positioned correctly relative to each other. Vertex normals are computed by accumulating cross-product face normals per vertex. Two WebGL contexts are used: one driving the interactive canvas, and one 240×240 offscreen canvas (created with <code>preserveDrawingBuffer: true</code>) that re-renders each combination and exports the result via <code>toDataURL()</code> into a thumbnail image.</p>
+      <p>For <em>P</em> parts and <em>K</em> selected colors, there are <em>K<sup>P</sup></em> assignments. The grid caps display at 32 thumbnails (you'll see a message if more exist), since the count grows quickly — pick fewer colors or upload a simpler model to see them all.</p>
+    </div>
+  </details>
+
+  <main>
+    <h1>3MF Multicolor Viewer</h1>
+
+    <div id="error-msg" hidden></div>
+
+    <div id="drop-zone">
+      <svg class="drop-icon" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline stroke-linecap="round" stroke-linejoin="round" points="17 8 12 3 7 8"/>
+        <line stroke-linecap="round" x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <span id="drop-label">Drop a .3mf file here</span>
+      <span class="drop-hint">or click to browse</span>
+    </div>
+    <input type="file" id="file-input" accept=".3mf" style="display:none">
+
+    <div id="viewer-area" hidden>
+      <div class="viewer-toolbar">
+        <span class="filename-label" id="filename-label"></span>
+        <button class="btn" id="reset-btn">Reset view</button>
+        <button class="btn" id="load-btn">Load another</button>
+      </div>
+      <div class="viewer-layout">
+        <div style="flex:1 1 auto;min-width:0">
+          <div id="plateTabs" class="plate-tabs"></div>
+          <canvas id="canvas"></canvas>
+          <div class="canvas-hint">Drag to orbit &nbsp;·&nbsp; Scroll to zoom</div>
+        </div>
+        <div id="info-panel"></div>
+      </div>
+
+      <div class="section-title">
+        Bambu Lab PLA Basic
+        <span class="muted">click to pick up to 4 colors</span>
+      </div>
+      <div id="color-palette" class="color-palette"></div>
+      <div id="selected-strip" class="selected-strip"></div>
+
+      <div id="saved-section" class="saved-section" hidden>
+        <div class="saved-header">
+          <span class="saved-title">Saved combos</span>
+          <button id="save-current-btn" class="action-btn">+ Save current</button>
+        </div>
+        <div id="saved-strip" class="saved-strip"></div>
+      </div>
+
+      <div class="section-title">
+        Combinations
+        <span class="muted" id="combo-count"></span>
+      </div>
+      <div id="combo-message" class="combo-message" hidden></div>
+      <div id="thumbnails" class="thumbnails"></div>
+    </div>
+  </main>
+
+  <!-- Inlined from experiments/lib/3mf-parser.js so this file works when opened via file:// -->
+  <script>
+// experiments/lib/3mf-parser.js
+// Self-contained 3MF parser. No external deps.
+// Returns a NormalizedScene (see plan doc) suitable for both 3mf-viewer.html
+// and 3mf-multicolor-viewer.html.
+(function () {
+  'use strict';
+
+  /* ===================== ZIP ===================== */
+  // Parses a ZIP archive in memory and returns { [path]: { data, compressed } }
+  // where `data` is a Uint8Array of the raw (still-compressed if `compressed`)
+  // bytes and `compressed` is true for deflate-compressed entries.
+  async function parseZip(buffer) {
+    const view = new DataView(buffer);
+    const bytes = new Uint8Array(buffer);
+    const td = new TextDecoder('utf-8');
+
+    // Find End of Central Directory (EOCD) - signature PK\x05\x06
+    let eocdOffset = -1;
+    for (let i = view.byteLength - 22; i >= Math.max(0, view.byteLength - 65557); i--) {
+      if (view.getUint32(i, true) === 0x06054b50) { eocdOffset = i; break; }
+    }
+    if (eocdOffset < 0) throw new Error('Not a ZIP archive (no EOCD found).');
+
+    let entryCount = view.getUint16(eocdOffset + 10, true);
+    let cdSize     = view.getUint32(eocdOffset + 12, true);
+    let cdOffset   = view.getUint32(eocdOffset + 16, true);
+
+    // ZIP64 fallback: if any of these is 0xFFFFFFFF, walk from start.
+    if (cdOffset === 0xFFFFFFFF || cdSize === 0xFFFFFFFF || entryCount === 0xFFFF) {
+      return parseZipLinear(view, bytes, td);
+    }
+
+    const files = {};
+    let p = cdOffset;
+    for (let i = 0; i < entryCount; i++) {
+      if (view.getUint32(p, true) !== 0x02014b50) break; // central dir header sig
+      const method  = view.getUint16(p + 10, true);
+      const compSize = view.getUint32(p + 20, true);
+      const nameLen  = view.getUint16(p + 28, true);
+      const extraLen = view.getUint16(p + 30, true);
+      const commentLen = view.getUint16(p + 32, true);
+      const localHdr = view.getUint32(p + 42, true);
+      const name = td.decode(bytes.subarray(p + 46, p + 46 + nameLen));
+      // Skip to local header to find true file data offset
+      const lhNameLen = view.getUint16(localHdr + 26, true);
+      const lhExtraLen = view.getUint16(localHdr + 28, true);
+      const dataOffset = localHdr + 30 + lhNameLen + lhExtraLen;
+      files[name] = {
+        data: bytes.subarray(dataOffset, dataOffset + compSize),
+        compressed: method === 8,
+      };
+      p += 46 + nameLen + extraLen + commentLen;
+    }
+    return files;
+  }
+
+  // Linear scan over local file headers — used for ZIP64 archives.
+  function parseZipLinear(view, bytes, td) {
+    const files = {};
+    let p = 0;
+    while (p < view.byteLength - 4) {
+      const sig = view.getUint32(p, true);
+      if (sig !== 0x04034b50) break;
+      const method  = view.getUint16(p + 8, true);
+      const flags    = view.getUint16(p + 6, true);
+      let   compSize = view.getUint32(p + 18, true);
+      const nameLen  = view.getUint16(p + 26, true);
+      const extraLen = view.getUint16(p + 28, true);
+      const name = td.decode(bytes.subarray(p + 30, p + 30 + nameLen));
+      const dataOffset = p + 30 + nameLen + extraLen;
+
+      if ((flags & 0x08) && compSize === 0) {
+        // Streaming entry (GP bit 3 set): true compressed size is in a trailing
+        // data descriptor (signature 0x08074b50). Scan forward to find it.
+        let scan = dataOffset;
+        let found = false;
+        while (scan < view.byteLength - 4) {
+          if (view.getUint32(scan, true) === 0x08074b50) {
+            compSize = view.getUint32(scan + 8, true); // sig, crc32, compSize, uncompSize
+            files[name] = {
+              data: bytes.subarray(dataOffset, dataOffset + compSize),
+              compressed: method === 8,
+            };
+            p = scan + 16; // advance past 16-byte descriptor (incl. signature)
+            found = true;
+            break;
+          }
+          scan++;
+        }
+        if (!found) {
+          console.warn(`parseZipLinear: no data descriptor found for streaming entry ${name}; aborting scan.`);
+          break;
+        }
+        continue;
+      }
+
+      files[name] = {
+        data: bytes.subarray(dataOffset, dataOffset + compSize),
+        compressed: method === 8,
+      };
+      p = dataOffset + compSize;
+    }
+    return files;
+  }
+
+  async function inflate(entry) {
+    if (!entry.compressed) return entry.data;
+    const ds = new DecompressionStream('deflate-raw');
+    const blob = new Blob([entry.data]);
+    const stream = blob.stream().pipeThrough(ds);
+    const buf = await new Response(stream).arrayBuffer();
+    return new Uint8Array(buf);
+  }
+
+  /* ===================== XML / MESH ===================== */
+  // 3MF transforms are stored as 4×3 row-major (12 floats: 3 rows of a 4×4
+  // missing the [0,0,0,1] bottom row, BUT 3MF spec uses *column-major* 4×3
+  // where the 3 cols are the basis vectors and the 4th col is the translation.
+  // See: 3MF Core Spec §3.3. Convert to column-major 4×4.
+  function parse3MFTransform(str) {
+    if (!str) return identity4x4();
+    const v = str.trim().split(/\s+/).map(parseFloat);
+    if (v.length !== 12 || v.some(Number.isNaN)) return identity4x4();
+    // 3MF: m00 m01 m02  m10 m11 m12  m20 m21 m22  m30 m31 m32
+    //  → basis columns are (m00,m01,m02), (m10,m11,m12), (m20,m21,m22);
+    //    translation is (m30,m31,m32). Stored column-major in our 16-float buf.
+    return new Float32Array([
+      v[0], v[1], v[2], 0,
+      v[3], v[4], v[5], 0,
+      v[6], v[7], v[8], 0,
+      v[9], v[10], v[11], 1,
+    ]);
+  }
+  function identity4x4() {
+    return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+  }
+  function mat4Mul(a, b) {
+    const o = new Float32Array(16);
+    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+      let s = 0;
+      for (let k = 0; k < 4; k++) s += a[k*4 + r] * b[c*4 + k];
+      o[c*4 + r] = s;
+    }
+    return o;
+  }
+  function transformPoint(m, x, y, z) {
+    return [
+      m[0]*x + m[4]*y + m[8]*z  + m[12],
+      m[1]*x + m[5]*y + m[9]*z  + m[13],
+      m[2]*x + m[6]*y + m[10]*z + m[14],
+    ];
+  }
+
+  function extractMesh(meshEl) {
+    const verts = [], tris = [];
+    for (const v of meshEl.getElementsByTagNameNS('*', 'vertex')) {
+      const x = v.getAttribute('x'), y = v.getAttribute('y'), z = v.getAttribute('z');
+      if (x === null || y === null || z === null) continue; // skip malformed vertex
+      verts.push(parseFloat(x), parseFloat(y), parseFloat(z));
+    }
+    for (const t of meshEl.getElementsByTagNameNS('*', 'triangle')) {
+      const a = t.getAttribute('v1'), b = t.getAttribute('v2'), c = t.getAttribute('v3');
+      if (a === null || b === null || c === null) continue; // skip malformed triangle
+      tris.push(parseInt(a, 10), parseInt(b, 10), parseInt(c, 10));
+    }
+    if (!verts.length || !tris.length) return null;
+    return { vertices: new Float32Array(verts), triangles: new Uint32Array(tris) };
+  }
+
+  // Resolve a component path. 3MF stores paths absolute from the archive root
+  // ("/3D/Objects/object_109.model"). Strip leading slash to match our zipFiles keys.
+  function normalizePath(p, base) {
+    if (!p) return base;
+    if (p.startsWith('/')) return p.slice(1);
+    // Relative — resolve against base file directory
+    const dir = base.includes('/') ? base.slice(0, base.lastIndexOf('/') + 1) : '';
+    return dir + p;
+  }
+
+  // Parse one .model XML into { rootMetadata, unit, objects: Map<id, {mesh, components}>, buildItems: [{objectId, transform}] }
+  function parseModelXML(xmlText, ownPath) {
+    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+    if (doc.querySelector('parsererror')) {
+      throw new Error(`Invalid XML in ${ownPath}`);
+    }
+    const root = doc.documentElement;
+    const unit = root.getAttribute('unit') || 'millimeter';
+
+    const rootMetadata = {};
+    for (const child of root.children) {
+      if (child.localName !== 'metadata') continue;
+      const n = child.getAttribute('name'), v = child.textContent.trim();
+      if (n && v) rootMetadata[n] = v;
+    }
+
+    const objects = new Map();
+    for (const obj of root.getElementsByTagNameNS('*', 'object')) {
+      const id = obj.getAttribute('id');
+      if (!id) continue;
+      const nameAttr = obj.getAttribute('name') || obj.getAttribute('partname') || '';
+      const directMeshes = [...obj.children].filter(c => c.localName === 'mesh');
+      let mesh = null;
+      if (directMeshes.length) {
+        // Combine multiple direct meshes (rare, but valid) into one part.
+        const vAll = [], tAll = [];
+        for (const m of directMeshes) {
+          const em = extractMesh(m);
+          if (!em) continue;
+          const off = vAll.length / 3;
+          for (const v of em.vertices) vAll.push(v);
+          for (const t of em.triangles) tAll.push(t + off);
+        }
+        if (vAll.length) mesh = { vertices: new Float32Array(vAll), triangles: new Uint32Array(tAll) };
+      }
+      const components = [];
+      for (const comp of obj.getElementsByTagNameNS('*', 'component')) {
+        const targetId = comp.getAttribute('objectid');
+        if (!targetId) continue;
+        const pPath = comp.getAttributeNS('http://schemas.microsoft.com/3dmanufacturing/production/2015/06', 'path')
+                   || comp.getAttribute('p:path') // some files don't declare the namespace
+                   || null;
+        components.push({
+          targetPath: pPath ? normalizePath(pPath, ownPath) : ownPath,
+          targetId,
+          transform: parse3MFTransform(comp.getAttribute('transform')),
+        });
+      }
+      objects.set(id, { id, name: nameAttr, mesh, components });
+    }
+
+    const buildItems = [];
+    const buildEl = root.getElementsByTagNameNS('*', 'build')[0];
+    if (buildEl) {
+      for (const item of buildEl.getElementsByTagNameNS('*', 'item')) {
+        const objectId = item.getAttribute('objectid');
+        if (!objectId) continue;
+        buildItems.push({
+          objectId,
+          transform: parse3MFTransform(item.getAttribute('transform')),
+        });
+      }
+    }
+
+    return { unit, rootMetadata, objects, buildItems };
+  }
+
+  /* ===================== COMPONENT RESOLUTION ===================== */
+  // Walk one object's graph; emit { meshObjectId, vertices, triangles } leaves
+  // with the cumulative transform applied to vertex positions.
+  function resolveObjectToParts(objectId, sourcePath, cumulativeXform, modelIndex, out, visited = new Set()) {
+    const key = sourcePath + '#' + objectId;
+    if (visited.has(key)) {
+      console.warn(`3MF component cycle detected at ${key}; skipping.`);
+      return;
+    }
+    visited.add(key);
+    const file = modelIndex.get(sourcePath);
+    if (!file) return; // missing component file — silently skip
+    const obj = file.objects.get(objectId);
+    if (!obj) return;
+
+    // If this object has a mesh, emit it as a part (transformed).
+    if (obj.mesh) {
+      const v = obj.mesh.vertices;
+      const out3 = new Float32Array(v.length);
+      for (let i = 0; i < v.length; i += 3) {
+        const p = transformPoint(cumulativeXform, v[i], v[i+1], v[i+2]);
+        out3[i] = p[0]; out3[i+1] = p[1]; out3[i+2] = p[2];
+      }
+      out.push({
+        meshObjectId: obj.id,
+        meshObjectName: obj.name,
+        sourcePath,
+        vertices: out3,
+        triangles: obj.mesh.triangles, // share buffer — never mutated by renderer
+      });
+    }
+
+    // Recurse into components, composing transforms.
+    for (const c of obj.components) {
+      const composed = mat4Mul(cumulativeXform, c.transform);
+      resolveObjectToParts(c.targetId, c.targetPath, composed, modelIndex, out, visited);
+    }
+  }
+
+  /* ===================== MODEL_SETTINGS.CONFIG ===================== */
+  function parseModelSettings(xmlText) {
+    if (!xmlText) return { objects: new Map(), plates: [] };
+    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+    if (doc.querySelector('parsererror')) return { objects: new Map(), plates: [] };
+
+    const getMeta = (el, key) => {
+      for (const m of el.children) {
+        if (m.localName === 'metadata' && m.getAttribute('key') === key) {
+          return m.getAttribute('value');
+        }
+      }
+      return null;
+    };
+
+    const objects = new Map();
+    for (const obj of doc.documentElement.children) {
+      if (obj.localName !== 'object') continue;
+      const id = obj.getAttribute('id');
+      if (!id) continue;
+      const name = getMeta(obj, 'name') || '';
+      const parts = new Map();
+      for (const p of obj.children) {
+        if (p.localName !== 'part') continue;
+        const pid = p.getAttribute('id');
+        if (!pid) continue;
+        const pname = getMeta(p, 'name') || '';
+        const extruder = getMeta(p, 'extruder');
+        parts.set(pid, {
+          name: pname,
+          extruder: extruder ? parseInt(extruder, 10) : null,
+        });
+      }
+      objects.set(id, { name, parts });
+    }
+
+    const plates = [];
+    for (const pl of doc.documentElement.children) {
+      if (pl.localName !== 'plate') continue;
+      const id = parseInt(getMeta(pl, 'plater_id') || '0', 10) || (plates.length + 1);
+      const name = getMeta(pl, 'plater_name') || `Plate ${id}`;
+      const objectIds = [];
+      for (const mi of pl.children) {
+        if (mi.localName !== 'model_instance') continue;
+        const oid = getMeta(mi, 'object_id');
+        if (oid) objectIds.push(oid);
+      }
+      plates.push({ id, name, objectIds });
+    }
+
+    return { objects, plates };
+  }
+
+  /* ===================== TOP-LEVEL parseScene ===================== */
+  async function parseScene(arrayBuffer) {
+    const zipFiles = await parseZip(arrayBuffer);
+
+    // Root model — 3MF spec requires it at "3D/3dmodel.model"; some archives lowercase.
+    const rootKey = Object.keys(zipFiles).find(k => /^3d\/3dmodel\.model$/i.test(k));
+    if (!rootKey) {
+      const listing = Object.keys(zipFiles).slice(0, 12).join(', ');
+      throw new Error(`No 3D/3dmodel.model found. Archive contains: ${listing}`);
+    }
+
+    // Decode all .model files in parallel; build path → parsed-doc index.
+    const modelKeys = Object.keys(zipFiles).filter(k => k.toLowerCase().endsWith('.model'));
+    const td = new TextDecoder();
+    const modelIndex = new Map();
+    await Promise.all(modelKeys.map(async (k) => {
+      let bytes;
+      try { bytes = await inflate(zipFiles[k]); }
+      catch (e) { console.warn(`Failed to decompress ${k}:`, e.message); return; }
+      try {
+        const parsed = parseModelXML(td.decode(bytes), k);
+        modelIndex.set(k, parsed);
+      } catch (e) {
+        console.warn(`Failed to parse ${k}:`, e.message);
+      }
+    }));
+
+    const root = modelIndex.get(rootKey);
+    if (!root) throw new Error('Root 3dmodel.model failed to parse.');
+
+    // Optional Bambu settings.
+    const settingsKey = Object.keys(zipFiles).find(k => /metadata\/model_settings\.config$/i.test(k));
+    let settings = { objects: new Map(), plates: [] };
+    if (settingsKey) {
+      try {
+        const bytes = await inflate(zipFiles[settingsKey]);
+        settings = parseModelSettings(td.decode(bytes));
+      } catch (e) { console.warn('Failed to parse model_settings.config:', e.message); }
+    }
+
+    // Optional Bambu project settings (gives us actual filament colors used in the print).
+    const projectKey = Object.keys(zipFiles).find(k => /metadata\/project_settings\.config$/i.test(k));
+    let filamentColors = [];
+    if (projectKey) {
+      try {
+        const bytes = await inflate(zipFiles[projectKey]);
+        const json = JSON.parse(new TextDecoder().decode(bytes));
+        if (Array.isArray(json.filament_colour)) {
+          filamentColors = json.filament_colour.filter(c => typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c));
+        }
+      } catch (e) { console.warn('Failed to parse project_settings.config:', e.message); }
+    }
+
+    // Build one instance per <build><item>.
+    const instances = root.buildItems.map((bi) => {
+      const leaves = [];
+      resolveObjectToParts(bi.objectId, rootKey, bi.transform, modelIndex, leaves);
+
+      // Each leaf is one rendered part. Friendly names + extruder come from
+      // settings.objects.get(bi.objectId).parts, keyed by leaf order if present,
+      // otherwise by the leaf's own meshObjectName. Bambu's part IDs in
+      // model_settings.config typically match leaf order within the top-level object.
+      const settingObj = settings.objects.get(bi.objectId);
+      const settingParts = settingObj ? [...settingObj.parts.values()] : [];
+
+      const parts = leaves.map((leaf, idx) => {
+        // NOTE: positional match — assumes Bambu's <part> order in model_settings.config
+        // mirrors leaf emission order from resolveObjectToParts. Changing leaf order
+        // (e.g., emit order in resolveObjectToParts) will silently misalign names/extruders.
+        const sp = settingParts[idx] || null;
+        const name = (sp && sp.name) || leaf.meshObjectName || `Part ${leaf.meshObjectId}`;
+        const extruder = sp ? sp.extruder : null;
+        return {
+          name,
+          extruder,
+          vertices: leaf.vertices,
+          triangles: leaf.triangles,
+        };
+      });
+
+      return {
+        objectId: bi.objectId,
+        objectName: (settingObj && settingObj.name) || `Object ${bi.objectId}`,
+        parts,
+      };
+    });
+
+    // Group instances into plates. If settings has plates, use them; otherwise one plate.
+    let plates;
+    if (settings.plates.length) {
+      plates = settings.plates.map((pl) => ({
+        id: pl.id,
+        name: pl.name,
+        instances: instances.filter(inst => pl.objectIds.includes(inst.objectId)),
+      })).filter(p => p.instances.length); // drop empty plates
+      // Any instance not claimed by a plate goes into a synthetic trailing plate.
+      const claimed = new Set(settings.plates.flatMap(p => p.objectIds));
+      const orphans = instances.filter(inst => !claimed.has(inst.objectId));
+      if (orphans.length) plates.push({
+        id: (plates.at(-1)?.id || 0) + 1,
+        name: 'Unassigned',
+        instances: orphans,
+      });
+      // If instances.length === 0, plates is intentionally [] — nothing to render.
+    } else {
+      plates = [{ id: 1, name: 'Plate 1', instances }];
+    }
+
+    return {
+      filename: '',
+      unit: root.unit,
+      metadata: root.rootMetadata,
+      filamentColors,
+      plates,
+    };
+  }
+
+  window.Scene3MF = { parseScene };
+})();
+  </script>
+  <script>
+    /* ===================== BAMBU LAB PLA BASIC CATALOG ===================== */
+    // Approximate hex values for the commonly-stocked Bambu Lab PLA Basic palette.
+    // Light flag is used to flip the in-swatch label color for readability.
+    const BAMBU_PLA = [
+      { name: 'Jade White',     hex: '#FFFFFF', light: true  },
+      { name: 'Bone White',     hex: '#CBC6B8', light: true  },
+      { name: 'Beige',          hex: '#F7E6DE', light: true  },
+      { name: 'Yellow',         hex: '#F4EE2A', light: true  },
+      { name: 'Gold',           hex: '#E5B13C', light: true  },
+      { name: 'Pumpkin Orange', hex: '#FF9016', light: false },
+      { name: 'Orange',         hex: '#FF6A13', light: false },
+      { name: 'Red',            hex: '#C12E1F', light: false },
+      { name: 'Maroon Red',     hex: '#7B3635', light: false },
+      { name: 'Hot Pink',       hex: '#F55A74', light: false },
+      { name: 'Magenta',        hex: '#EC008C', light: false },
+      { name: 'Purple',         hex: '#5E43B7', light: false },
+      { name: 'Indigo',         hex: '#482960', light: false },
+      { name: 'Blue',           hex: '#0A2989', light: false },
+      { name: 'Blue Gray',      hex: '#5B6579', light: false },
+      { name: 'Cyan',           hex: '#0086D6', light: false },
+      { name: 'Turquoise',      hex: '#00B1B7', light: false },
+      { name: 'Bambu Green',    hex: '#00AE42', light: false },
+      { name: 'Mistletoe',      hex: '#3F8E43', light: false },
+      { name: 'Brown',          hex: '#9D432C', light: false },
+      { name: 'Cocoa',          hex: '#6B4534', light: false },
+      { name: 'Silver',         hex: '#A6A9AA', light: true  },
+      { name: 'Gray',           hex: '#8E9089', light: false },
+      { name: 'Dark Gray',      hex: '#545454', light: false },
+      { name: 'Black',          hex: '#000000', light: false },
+    ];
+
+    const MAX_COLORS = 4;
+    const MAX_THUMBS = 32;
+    const NEUTRAL_GRAY = [0.55, 0.6, 0.65];
+
+    /* ===================== GEOMETRY ===================== */
+    // Compute global bbox over all parts; return centered/scaled per-part geometry
+    // plus per-vertex normals. Each part keeps its own VBO data but uses the same transform.
+    function processParts(rawParts) {
+      let minX = Infinity, minY = Infinity, minZ = Infinity;
+      let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+      for (const p of rawParts) {
+        const v = p.vertices;
+        for (let i = 0; i < v.length; i += 3) {
+          if (v[i]   < minX) minX = v[i];   if (v[i]   > maxX) maxX = v[i];
+          if (v[i+1] < minY) minY = v[i+1]; if (v[i+1] > maxY) maxY = v[i+1];
+          if (v[i+2] < minZ) minZ = v[i+2]; if (v[i+2] > maxZ) maxZ = v[i+2];
+        }
+      }
+      const dims = [maxX - minX, maxY - minY, maxZ - minZ];
+      const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
+      const scale = 2.0 / Math.max(...dims, 0.001);
+
+      let totalV = 0, totalT = 0;
+      const processed = [];
+      for (const p of rawParts) {
+        const v = p.vertices;
+        const out = new Float32Array(v.length);
+        for (let i = 0; i < v.length; i += 3) {
+          out[i  ] = (v[i  ] - cx) * scale;
+          out[i+1] = (v[i+1] - cy) * scale;
+          out[i+2] = (v[i+2] - cz) * scale;
+        }
+        const normals = new Float32Array(v.length);
+        const tris = p.triangles;
+        for (let i = 0; i < tris.length; i += 3) {
+          const i0 = tris[i], i1 = tris[i+1], i2 = tris[i+2];
+          const ax = out[i0*3], ay = out[i0*3+1], az = out[i0*3+2];
+          const bx = out[i1*3], by = out[i1*3+1], bz = out[i1*3+2];
+          const ex = out[i2*3], ey = out[i2*3+1], ez = out[i2*3+2];
+          const ux = bx-ax, uy = by-ay, uz = bz-az;
+          const vx = ex-ax, vy = ey-ay, vz = ez-az;
+          const nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
+          for (const idx of [i0, i1, i2]) {
+            normals[idx*3  ] += nx;
+            normals[idx*3+1] += ny;
+            normals[idx*3+2] += nz;
+          }
+        }
+        for (let i = 0; i < normals.length; i += 3) {
+          const len = Math.sqrt(normals[i]**2 + normals[i+1]**2 + normals[i+2]**2);
+          if (len > 0) { normals[i] /= len; normals[i+1] /= len; normals[i+2] /= len; }
+        }
+        const nVerts = out.length / 3;
+        const indices = nVerts <= 65536 ? new Uint16Array(tris) : tris;
+        processed.push({
+          name: p.name,
+          verts: out, normals, indices,
+          indexType: indices instanceof Uint16Array ? 'u16' : 'u32',
+          vertexCount: nVerts,
+          triangleCount: tris.length / 3,
+        });
+        totalV += nVerts;
+        totalT += tris.length / 3;
+      }
+      return { parts: processed, dims, totalV, totalT };
+    }
+
+    /* ===================== MATRIX MATH ===================== */
+    function matPerspective(fovY, aspect, near, far) {
+      const f = 1.0 / Math.tan(fovY * 0.5), nf = 1.0 / (near - far);
+      return new Float32Array([
+        f/aspect,0,0,0,  0,f,0,0,
+        0,0,(near+far)*nf,-1,  0,0,2*near*far*nf,0,
+      ]);
+    }
+    function matRotX(a) { const c=Math.cos(a),s=Math.sin(a); return new Float32Array([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]); }
+    function matRotY(a) { const c=Math.cos(a),s=Math.sin(a); return new Float32Array([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]); }
+    function matTranslate(tx,ty,tz) { return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, tx,ty,tz,1]); }
+    function matMul(a, b) {
+      const o = new Float32Array(16);
+      for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+        let s = 0;
+        for (let k = 0; k < 4; k++) s += a[k*4+r] * b[c*4+k];
+        o[c*4+r] = s;
+      }
+      return o;
+    }
+    function mat3From4(m) { return new Float32Array([m[0],m[1],m[2], m[4],m[5],m[6], m[8],m[9],m[10]]); }
+
+    function hexToRGB(hex) {
+      const r = parseInt(hex.slice(1, 3), 16) / 255;
+      const g = parseInt(hex.slice(3, 5), 16) / 255;
+      const b = parseInt(hex.slice(5, 7), 16) / 255;
+      return [r, g, b];
+    }
+
+    /* ===================== WEBGL CONTEXT WRAPPER ===================== */
+    // Builds a self-contained renderer for one canvas. Each part gets its own
+    // VBO + index buffer so we can issue one drawElements per part with its
+    // own color uniform.
+    function createRenderer(canvas, opts = {}) {
+      const gl = canvas.getContext('webgl', opts) || canvas.getContext('experimental-webgl', opts);
+      if (!gl) throw new Error('WebGL is not supported in this browser.');
+
+      const compile = (type, src) => {
+        const s = gl.createShader(type);
+        gl.shaderSource(s, src); gl.compileShader(s);
+        if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+          throw new Error('Shader: ' + gl.getShaderInfoLog(s));
+        return s;
+      };
+
+      const vs = compile(gl.VERTEX_SHADER, `
+        attribute vec3 aPos;
+        attribute vec3 aNorm;
+        uniform mat4 uMVP;
+        uniform mat3 uNMat;
+        varying float vLight;
+        void main() {
+          vec3 n = normalize(uNMat * aNorm);
+          vec3 L = normalize(vec3(0.6, 0.9, 1.0));
+          float diff = max(dot(n, L), 0.0);
+          float back = max(dot(-n, L), 0.0) * 0.18;
+          vLight = 0.22 + diff * 0.78 + back;
+          gl_Position = uMVP * vec4(aPos, 1.0);
+        }
+      `);
+      const fs = compile(gl.FRAGMENT_SHADER, `
+        precision mediump float;
+        varying float vLight;
+        uniform vec3 uColor;
+        void main() {
+          gl_FragColor = vec4(uColor * vLight, 1.0);
+        }
+      `);
+
+      const prog = gl.createProgram();
+      gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
+        throw new Error('Link: ' + gl.getProgramInfoLog(prog));
+
+      const locs = {
+        aPos:   gl.getAttribLocation(prog, 'aPos'),
+        aNorm:  gl.getAttribLocation(prog, 'aNorm'),
+        uMVP:   gl.getUniformLocation(prog, 'uMVP'),
+        uNMat:  gl.getUniformLocation(prog, 'uNMat'),
+        uColor: gl.getUniformLocation(prog, 'uColor'),
+      };
+
+      gl.enable(gl.DEPTH_TEST);
+      gl.clearColor(0.031, 0.047, 0.078, 1.0);
+
+      // Per-part GPU buffers
+      let partGpu = []; // [{ posVBO, normVBO, ibo, count, type }]
+      let needU32Ext = false;
+
+      function dispose() {
+        for (const p of partGpu) {
+          gl.deleteBuffer(p.posVBO);
+          gl.deleteBuffer(p.normVBO);
+          gl.deleteBuffer(p.ibo);
+        }
+        partGpu = [];
+      }
+
+      function uploadParts(parts) {
+        dispose();
+        for (const p of parts) {
+          const posVBO  = gl.createBuffer();
+          gl.bindBuffer(gl.ARRAY_BUFFER, posVBO);
+          gl.bufferData(gl.ARRAY_BUFFER, p.verts, gl.STATIC_DRAW);
+
+          const normVBO = gl.createBuffer();
+          gl.bindBuffer(gl.ARRAY_BUFFER, normVBO);
+          gl.bufferData(gl.ARRAY_BUFFER, p.normals, gl.STATIC_DRAW);
+
+          const ibo = gl.createBuffer();
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+          gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, p.indices, gl.STATIC_DRAW);
+
+          let type = gl.UNSIGNED_SHORT;
+          if (p.indexType === 'u32') {
+            if (!needU32Ext) {
+              const ext = gl.getExtension('OES_element_index_uint');
+              if (!ext) throw new Error('Mesh too large: OES_element_index_uint not available.');
+              needU32Ext = true;
+            }
+            type = gl.UNSIGNED_INT;
+          }
+
+          partGpu.push({ posVBO, normVBO, ibo, count: p.indices.length, type });
+        }
+      }
+
+      function render(theta, phi, camDist, partColors) {
+        const w = canvas.width, h = canvas.height;
+        gl.viewport(0, 0, w, h);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        if (!partGpu.length) return;
+
+        gl.useProgram(prog);
+
+        const model = matMul(matRotX(phi), matRotY(theta));
+        const view  = matTranslate(0, 0, -camDist);
+        const proj  = matPerspective(Math.PI / 4, w / h, 0.05, 100);
+        const mvp   = matMul(proj, matMul(view, model));
+
+        gl.uniformMatrix4fv(locs.uMVP, false, mvp);
+        gl.uniformMatrix3fv(locs.uNMat, false, mat3From4(model));
+
+        for (let i = 0; i < partGpu.length; i++) {
+          const gp = partGpu[i];
+          const color = partColors[i] || NEUTRAL_GRAY;
+          gl.uniform3fv(locs.uColor, new Float32Array(color));
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, gp.posVBO);
+          gl.enableVertexAttribArray(locs.aPos);
+          gl.vertexAttribPointer(locs.aPos, 3, gl.FLOAT, false, 0, 0);
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, gp.normVBO);
+          gl.enableVertexAttribArray(locs.aNorm);
+          gl.vertexAttribPointer(locs.aNorm, 3, gl.FLOAT, false, 0, 0);
+
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gp.ibo);
+          gl.drawElements(gl.TRIANGLES, gp.count, gp.type, 0);
+        }
+      }
+
+      function resizeIfNeeded() {
+        const w = canvas.clientWidth, h = canvas.clientHeight;
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w; canvas.height = h;
+        }
+      }
+
+      return { gl, render, uploadParts, resizeIfNeeded, dispose };
+    }
+
+    /* ===================== STATE ===================== */
+    const canvas = document.getElementById('canvas');
+    const thumbCanvas = document.createElement('canvas');
+    thumbCanvas.width = 320;
+    thumbCanvas.height = 320;
+
+    let mainRenderer = null;
+    let thumbRenderer = null;
+
+    // Geometry data
+    let parts = []; // [{ name, verts, normals, indices, ... }]
+
+    // View state
+    let theta = 0.4, phi = 0.2, camDist = 4.0;
+    let rafId = null;
+
+    // Color state
+    let selectedColors = []; // array of { name, hex } from BAMBU_PLA (or synthesized)
+    let currentAssignment = null; // array of color objects (length === distinct group count)
+    let displayedAssignmentsByInstance = {}; // instanceKey -> { assignments, groupIds }
+
+    // Grouping state
+    let partGroupId = []; // partGroupId[i] is the group id for parts[i]
+    let selectedPartIndices = new Set(); // parts the user has checked in the panel
+
+    // Saved snapshots (session-only)
+    let savedSnapshots = []; // [{ id, name, thumbnailDataURL, selectedColorsSnapshot, partGroupIdSnapshot, currentAssignmentSnapshot }]
+    let snapshotCounter = 0;
+
+    // Scene state (from shared parser)
+    let scene = null;
+    let activePlateId = null;
+
+    /* ===================== RENDER LOOP ===================== */
+    function renderLoop() {
+      rafId = requestAnimationFrame(renderLoop);
+      if (!mainRenderer || !parts.length) return;
+      mainRenderer.resizeIfNeeded();
+      const colors = currentColorsForRender();
+      mainRenderer.render(theta, phi, camDist, colors);
+    }
+
+    function currentColorsForRender() {
+      // Returns an array of RGB triples (one per part). Color comes from the
+      // part's group via currentAssignment. Missing/unknown → neutral gray.
+      const groupIds = getDistinctGroupIds();
+      const gidToColor = new Map();
+      groupIds.forEach((gid, idx) => gidToColor.set(gid, currentAssignment ? currentAssignment[idx] : null));
+      const out = [];
+      for (let i = 0; i < parts.length; i++) {
+        const c = gidToColor.get(partGroupId[i]);
+        out.push(c ? hexToRGB(c.hex) : NEUTRAL_GRAY);
+      }
+      return out;
+    }
+
+    /* ===================== GROUPING HELPERS ===================== */
+    function getDistinctGroupIds() {
+      const seen = new Set();
+      const out = [];
+      for (const gid of partGroupId) {
+        if (!seen.has(gid)) { seen.add(gid); out.push(gid); }
+      }
+      return out;
+    }
+
+    function getGroupMembers(gid) {
+      const out = [];
+      for (let i = 0; i < partGroupId.length; i++) if (partGroupId[i] === gid) out.push(i);
+      return out;
+    }
+
+    function isPartInMultiGroup(i) {
+      const gid = partGroupId[i];
+      let count = 0;
+      for (const g of partGroupId) if (g === gid) { count++; if (count > 1) return true; }
+      return false;
+    }
+
+    // Returns ordered list of distinct instance keys in the order they first appear.
+    function getInstanceKeys() {
+      const seen = new Set();
+      const out = [];
+      for (const p of parts) {
+        if (!seen.has(p.instanceKey)) { seen.add(p.instanceKey); out.push(p.instanceKey); }
+      }
+      return out;
+    }
+
+    // For an instance key, returns the distinct group IDs that have at least one
+    // part in that instance (in first-appearance order across parts of that instance).
+    function getInstanceGroupIds(instanceKey) {
+      const seen = new Set();
+      const out = [];
+      for (let i = 0; i < parts.length; i++) {
+        if (parts[i].instanceKey !== instanceKey) continue;
+        const gid = partGroupId[i];
+        if (!seen.has(gid)) { seen.add(gid); out.push(gid); }
+      }
+      return out;
+    }
+
+    // Returns the friendly name to show for an instance (its objectName, with
+    // a disambiguator suffix when two instances share the same objectName).
+    function getInstanceDisplayName(instanceKey) {
+      const keys = getInstanceKeys();
+      const names = keys.map(k => {
+        for (const p of parts) if (p.instanceKey === k) return p.objectName;
+        return '—';
+      });
+      const myIdx = keys.indexOf(instanceKey);
+      const myName = names[myIdx];
+      const duplicates = names.filter(n => n === myName).length;
+      if (duplicates <= 1) return myName;
+      let count = 0;
+      for (let i = 0; i <= myIdx; i++) if (names[i] === myName) count++;
+      return `${myName} (${count} of ${duplicates})`;
+    }
+
+    function groupSelected() {
+      if (selectedPartIndices.size < 2) return;
+      const touchedGids = new Set();
+      for (const i of selectedPartIndices) touchedGids.add(partGroupId[i]);
+      if (touchedGids.size < 2) {
+        selectedPartIndices.clear();
+        rerenderAfterGrouping();
+        return;
+      }
+      const newGid = Math.min(...touchedGids);
+      for (let i = 0; i < partGroupId.length; i++) {
+        if (touchedGids.has(partGroupId[i])) partGroupId[i] = newGid;
+      }
+      selectedPartIndices.clear();
+      rerenderAfterGrouping();
+    }
+
+    function ungroupSelected() {
+      if (!selectedPartIndices.size) return;
+      const toDissolve = new Set();
+      for (const i of selectedPartIndices) toDissolve.add(partGroupId[i]);
+      for (let i = 0; i < partGroupId.length; i++) {
+        if (toDissolve.has(partGroupId[i])) partGroupId[i] = i;
+      }
+      selectedPartIndices.clear();
+      rerenderAfterGrouping();
+    }
+
+    function rerenderAfterGrouping() {
+      // Rebuild currentAssignment to match new group count.
+      // Strategy: for each new group, use selectedColors[firstMember.extruder-1] if available,
+      // else selectedColors[0]. (Re-derive from extruders — user picks reset on regroup.)
+      const colorsBackup = selectedColors;
+      const groupIds = getDistinctGroupIds();
+      currentAssignment = groupIds.map(gid => {
+        const firstPartIdx = partGroupId.indexOf(gid);
+        const ext = parts[firstPartIdx]?.extruder;
+        if (ext && colorsBackup[ext - 1]) return colorsBackup[ext - 1];
+        return colorsBackup[0];
+      });
+      regenerateCombinations();
+      renderInfoPanel();
+    }
+
+    function clearPartSelection() {
+      selectedPartIndices.clear();
+      renderInfoPanel();
+    }
+    function togglePartSelection(i, on) {
+      if (on) selectedPartIndices.add(i); else selectedPartIndices.delete(i);
+      renderInfoPanel();
+    }
+    // Expose for inline onclick handlers.
+    window.groupSelected = groupSelected;
+    window.ungroupSelected = ungroupSelected;
+    window.clearPartSelection = clearPartSelection;
+    window.togglePartSelection = togglePartSelection;
+
+    /* ===================== CONTROLS ===================== */
+    let isDragging = false, lastX = 0, lastY = 0, lastPinch = 0;
+
+    canvas.addEventListener('mousedown', e => { isDragging = true; lastX = e.clientX; lastY = e.clientY; });
+    window.addEventListener('mouseup', () => {
+      if (isDragging) { isDragging = false; refreshThumbnailsAtCurrentAngle(); }
+    });
+    window.addEventListener('mousemove', e => {
+      if (!isDragging) return;
+      theta += (e.clientX - lastX) * 0.005;
+      phi    = Math.max(-1.5, Math.min(1.5, phi + (e.clientY - lastY) * 0.005));
+      lastX = e.clientX; lastY = e.clientY;
+    });
+    canvas.addEventListener('wheel', e => {
+      e.preventDefault();
+      camDist = Math.max(1.2, Math.min(20, camDist + e.deltaY * 0.01));
+    }, { passive: false });
+
+    canvas.addEventListener('touchstart', e => {
+      e.preventDefault();
+      if (e.touches.length === 1) {
+        isDragging = true; lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+      } else if (e.touches.length === 2) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        lastPinch = Math.sqrt(dx*dx + dy*dy);
+      }
+    }, { passive: false });
+    canvas.addEventListener('touchmove', e => {
+      e.preventDefault();
+      if (e.touches.length === 1 && isDragging) {
+        theta += (e.touches[0].clientX - lastX) * 0.005;
+        phi    = Math.max(-1.5, Math.min(1.5, phi + (e.touches[0].clientY - lastY) * 0.005));
+        lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+      } else if (e.touches.length === 2) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const d = Math.sqrt(dx*dx + dy*dy);
+        camDist = Math.max(1.2, Math.min(20, camDist - (d - lastPinch) * 0.02));
+        lastPinch = d;
+      }
+    }, { passive: false });
+    canvas.addEventListener('touchend', () => {
+      if (isDragging) { isDragging = false; refreshThumbnailsAtCurrentAngle(); }
+    });
+
+    /* ===================== UI ELEMENTS ===================== */
+    const dropZone     = document.getElementById('drop-zone');
+    const dropLabel    = document.getElementById('drop-label');
+    const fileInput    = document.getElementById('file-input');
+    const viewerArea   = document.getElementById('viewer-area');
+    const filenameEl   = document.getElementById('filename-label');
+    const infoPanel    = document.getElementById('info-panel');
+    const errorMsg     = document.getElementById('error-msg');
+    const paletteEl    = document.getElementById('color-palette');
+    const selectedEl   = document.getElementById('selected-strip');
+    const thumbsEl     = document.getElementById('thumbnails');
+    const comboCountEl = document.getElementById('combo-count');
+    const comboMsgEl   = document.getElementById('combo-message');
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault(); dropZone.classList.remove('drag-over');
+      const f = e.dataTransfer.files[0]; if (f) loadFile(f);
+    });
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files[0]) loadFile(fileInput.files[0]);
+    });
+
+    document.getElementById('reset-btn').addEventListener('click', () => {
+      theta = 0.4; phi = 0.2; camDist = 4.0;
+    });
+
+    document.getElementById('load-btn').addEventListener('click', () => {
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+      if (mainRenderer)  mainRenderer.dispose();
+      if (thumbRenderer) thumbRenderer.dispose();
+      parts = [];
+      currentAssignment = null;
+      viewerArea.hidden = true;
+      dropZone.hidden   = false;
+      dropLabel.textContent = 'Drop a .3mf file here';
+      fileInput.value = '';
+    });
+
+    function setError(msg) {
+      errorMsg.textContent = msg;
+      errorMsg.hidden = !msg;
+    }
+
+    function fmt(n, unit) {
+      return n.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' ' + unit;
+    }
+    function esc(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // Decode HTML entities once (Bambu's Description field is double-encoded; the
+    // outer pass is done by the XML DOMParser via textContent, the inner pass is here).
+    function decodeEntities(s) {
+      const ta = document.createElement('textarea');
+      ta.innerHTML = s;
+      return ta.value;
+    }
+
+    // Allowlist-based HTML sanitizer.
+    function sanitizeHTML(rawHTML) {
+      const ALLOWED_TAGS = new Set([
+        'h1','h2','h3','h4','h5','h6','p','br','hr','strong','em','b','i','u','s',
+        'a','ul','ol','li','blockquote','code','pre',
+        'table','thead','tbody','tfoot','tr','td','th','caption','colgroup','col',
+        'figure','figcaption','span','div','img'
+      ]);
+      const ALLOWED_ATTRS = new Set(['href','src','alt','title','class','style','colspan','rowspan','target','rel']);
+      const STYLE_ALLOWED_PROPS = new Set([
+        'color','background','background-color','text-align','width','height',
+        'margin','padding','border','font-weight','font-style','font-size','line-height',
+        'border-color','border-style','border-width','display'
+      ]);
+      function isSafeURL(url) {
+        const t = url.trim().toLowerCase();
+        return t.startsWith('http://') || t.startsWith('https://') || t.startsWith('mailto:') || t.startsWith('#') || t.startsWith('/') || (!t.includes(':'));
+      }
+      function sanitizeStyle(s) {
+        return s.split(';').map(d => d.trim()).filter(Boolean).filter(decl => {
+          const [prop] = decl.split(':');
+          return prop && STYLE_ALLOWED_PROPS.has(prop.trim().toLowerCase());
+        }).join('; ');
+      }
+      const doc = new DOMParser().parseFromString('<div>' + rawHTML + '</div>', 'text/html');
+      const root = doc.body.firstChild;
+      function walk(node) {
+        const children = [...node.childNodes];
+        for (const child of children) {
+          if (child.nodeType === 1) {
+            const tag = child.tagName.toLowerCase();
+            if (!ALLOWED_TAGS.has(tag)) {
+              walk(child);
+              while (child.firstChild) node.insertBefore(child.firstChild, child);
+              node.removeChild(child);
+              continue;
+            }
+            for (const attr of [...child.attributes]) {
+              const name = attr.name.toLowerCase();
+              if (!ALLOWED_ATTRS.has(name) || name.startsWith('on')) { child.removeAttribute(attr.name); continue; }
+              if ((name === 'href' || name === 'src') && !isSafeURL(attr.value)) { child.removeAttribute(attr.name); continue; }
+              if (name === 'style') {
+                const cleaned = sanitizeStyle(attr.value);
+                if (cleaned) child.setAttribute('style', cleaned); else child.removeAttribute('style');
+              }
+            }
+            if (tag === 'a' && child.hasAttribute('href')) {
+              child.setAttribute('target', '_blank');
+              child.setAttribute('rel', 'noopener noreferrer');
+            }
+            walk(child);
+          }
+        }
+      }
+      walk(root);
+      return root.innerHTML;
+    }
+
+    function looksLikeHTML(s) {
+      return /<\/?[a-zA-Z][^>]*>|&lt;[a-zA-Z]/.test(s);
+    }
+
+    function renderMetaValue(value) {
+      if (looksLikeHTML(value)) {
+        return `<div class="meta-html">${sanitizeHTML(decodeEntities(value))}</div>`;
+      }
+      return esc(value);
+    }
+
+    /* ===================== COLOR PALETTE ===================== */
+    function renderPalette() {
+      paletteEl.innerHTML = '';
+      const assignMode = selectedPartIndices.size > 0;
+      for (const c of BAMBU_PLA) {
+        const sel = selectedColors.some(s => s.hex === c.hex);
+        const div = document.createElement('div');
+        // In assign mode, every swatch is clickable (it paints the selection).
+        // Otherwise palette respects the MAX_COLORS cap.
+        div.className = 'color-swatch'
+          + (sel ? ' selected' : '')
+          + (!assignMode && !sel && selectedColors.length >= MAX_COLORS ? ' disabled' : '')
+          + (c.light ? ' light' : '');
+        div.style.background = c.hex;
+        div.title = c.name + ' — ' + c.hex;
+        div.innerHTML = `
+          ${sel ? `<span class="check">${selectedColors.findIndex(s => s.hex === c.hex) + 1}</span>` : ''}
+          <span class="swatch-label">${esc(c.name)}</span>
+        `;
+        div.addEventListener('click', () => toggleColor(c));
+        paletteEl.append(div);
+      }
+    }
+
+    function renderSelectedStrip() {
+      selectedEl.innerHTML = '';
+      if (!selectedColors.length) {
+        selectedEl.innerHTML = '<span class="selected-empty">No colors picked yet — click swatches above</span>';
+        return;
+      }
+      selectedColors.forEach((c, i) => {
+        const chip = document.createElement('span');
+        chip.className = 'selected-chip';
+        chip.innerHTML = `
+          <span class="swatch" style="background:${c.hex}"></span>
+          <span>${esc(c.name)}</span>
+          <span class="close" title="Remove">×</span>
+        `;
+        chip.querySelector('.close').addEventListener('click', () => {
+          selectedColors.splice(i, 1);
+          onColorsChanged();
+        });
+        selectedEl.append(chip);
+      });
+    }
+
+    function toggleColor(c) {
+      // If parts are checked in the panel, palette clicks apply the color to
+      // every group touched by the selection instead of toggling palette membership.
+      if (selectedPartIndices.size > 0) {
+        applyColorToSelection(c);
+        return;
+      }
+      const idx = selectedColors.findIndex(s => s.hex === c.hex);
+      if (idx >= 0) {
+        selectedColors.splice(idx, 1);
+      } else if (selectedColors.length < MAX_COLORS) {
+        selectedColors.push(c);
+      } else {
+        return;
+      }
+      onColorsChanged();
+    }
+
+    function applyColorToSelection(c) {
+      if (!selectedPartIndices.size || !currentAssignment) return;
+      // If there's room in the palette and this color isn't already there,
+      // add it (and let the combinations grid regenerate to include it).
+      // Otherwise apply as a one-off paint without disturbing selectedColors.
+      const alreadyInPalette = selectedColors.some(s => s.hex === c.hex);
+      const addedToPalette = !alreadyInPalette && selectedColors.length < MAX_COLORS;
+      if (addedToPalette) selectedColors.push(c);
+
+      const touchedGids = new Set();
+      for (const i of selectedPartIndices) touchedGids.add(partGroupId[i]);
+      const allGroupIds = getDistinctGroupIds();
+      allGroupIds.forEach((gid, idx) => {
+        if (touchedGids.has(gid)) currentAssignment[idx] = c;
+      });
+
+      renderPalette();
+      renderSelectedStrip();
+      if (addedToPalette) {
+        // Palette changed → rebuild the per-instance grids (and ensure the
+        // sweep inside regenerateCombinations preserves our new assignments
+        // because c is now in selectedColors).
+        regenerateCombinations();
+      } else {
+        // Palette unchanged → just refresh the existing thumbnails so they
+        // composite the updated group colors for *other* instances.
+        refreshThumbnailsAtCurrentAngle();
+      }
+      renderInfoPanel();
+      renderSavedStrip();
+    }
+
+    function onColorsChanged() {
+      renderPalette();
+      renderSelectedStrip();
+      regenerateCombinations();
+    }
+
+    /* ===================== COMBINATIONS ===================== */
+    // Enumerate every assignment of `colors` to `partCount` slots (with replacement).
+    function enumerateAssignments(colors, partCount) {
+      if (!colors.length || !partCount) return [];
+      const result = [];
+      const prefix = [];
+      function recurse() {
+        if (prefix.length === partCount) {
+          result.push(prefix.slice());
+          // Soft cap so we don't enumerate millions; we still know the total count.
+          if (result.length >= MAX_THUMBS * 4) return true;
+          return false;
+        }
+        for (const c of colors) {
+          prefix.push(c);
+          if (recurse()) { prefix.pop(); return true; }
+          prefix.pop();
+        }
+        return false;
+      }
+      recurse();
+      return result;
+    }
+
+    function regenerateCombinations() {
+      if (!parts.length) return;
+
+      if (!selectedColors.length) {
+        currentAssignment = null;
+        displayedAssignmentsByInstance = {};
+        comboCountEl.textContent = 'pick colors above to see combinations';
+        comboMsgEl.hidden = true;
+        thumbsEl.innerHTML = '';
+        renderInfoPanel();
+        renderSavedStrip();
+        return;
+      }
+
+      const totalGroupCount = getDistinctGroupIds().length;
+      const K = selectedColors.length;
+
+      // Ensure currentAssignment is sized to total groups.
+      if (!currentAssignment || currentAssignment.length !== totalGroupCount) {
+        currentAssignment = new Array(totalGroupCount).fill(selectedColors[0]);
+      } else {
+        currentAssignment = currentAssignment.map(c =>
+          selectedColors.some(s => s.hex === c.hex) ? c : selectedColors[0]
+        );
+      }
+
+      // Build per-instance grids.
+      thumbsEl.innerHTML = '';
+      displayedAssignmentsByInstance = {};
+      const instanceKeys = getInstanceKeys();
+      let totalShown = 0, totalAvailable = 0;
+
+      for (const instKey of instanceKeys) {
+        const instGroupIds = getInstanceGroupIds(instKey);
+        const Pi = instGroupIds.length;
+        if (!Pi) continue;
+        const totalCount = Math.pow(K, Pi);
+        const assignments = enumerateAssignments(selectedColors, Pi);
+        const displayed = assignments.slice(0, MAX_THUMBS);
+        displayedAssignmentsByInstance[instKey] = { assignments: displayed, groupIds: instGroupIds };
+        totalShown += displayed.length;
+        totalAvailable += totalCount;
+
+        const section = document.createElement('details');
+        section.className = 'instance-combos';
+        section.open = true;
+        const heading = document.createElement('summary');
+        heading.className = 'instance-combos-heading';
+        heading.innerHTML = `${esc(getInstanceDisplayName(instKey))} <span class="muted">· ${displayed.length} of ${totalCount.toLocaleString()}</span>`;
+        section.append(heading);
+
+        const grid = document.createElement('div');
+        grid.className = 'thumbs-grid';
+        section.append(grid);
+        thumbsEl.append(section);
+
+        renderThumbnailsForInstance(grid, displayed, instGroupIds, instKey);
+      }
+
+      comboCountEl.textContent = `${totalShown.toLocaleString()} thumbnails shown across ${instanceKeys.length} object${instanceKeys.length>1?'s':''} · ${totalAvailable.toLocaleString()} total possible`;
+      comboMsgEl.hidden = totalAvailable <= totalShown;
+      if (!comboMsgEl.hidden) {
+        comboMsgEl.textContent = `Each grid is capped at ${MAX_THUMBS} thumbnails. Reduce selected colors to see all combinations.`;
+      }
+
+      renderInfoPanel();
+      renderSavedStrip();
+    }
+
+    function expandGroupAssignmentToParts(assignment) {
+      // assignment is per-group (length = distinct group count). Map to per-part RGB.
+      const groupIds = getDistinctGroupIds();
+      const gidToColor = new Map();
+      groupIds.forEach((gid, idx) => gidToColor.set(gid, assignment[idx]));
+      return parts.map((_, i) => {
+        const c = gidToColor.get(partGroupId[i]);
+        return c ? hexToRGB(c.hex) : NEUTRAL_GRAY;
+      });
+    }
+
+    function refreshThumbnailsAtCurrentAngle() {
+      if (!thumbRenderer) return;
+      const allGroupIds = getDistinctGroupIds();
+      const allGidToIndex = new Map();
+      allGroupIds.forEach((gid, i) => allGidToIndex.set(gid, i));
+
+      const sections = thumbsEl.querySelectorAll('.instance-combos');
+      const instKeys = Object.keys(displayedAssignmentsByInstance);
+      sections.forEach((section, sIdx) => {
+        const instKey = instKeys[sIdx];
+        if (!instKey) return;
+        const { assignments, groupIds: instGroupIds } = displayedAssignmentsByInstance[instKey];
+        const imgs = section.querySelectorAll('.thumbs-grid .thumb img');
+        for (let i = 0; i < assignments.length && i < imgs.length; i++) {
+          const fullAssignment = currentAssignment.slice();
+          instGroupIds.forEach((gid, j) => { fullAssignment[allGidToIndex.get(gid)] = assignments[i][j]; });
+          const colors = expandGroupAssignmentToParts(fullAssignment);
+          thumbRenderer.render(theta, phi, camDist, colors);
+          imgs[i].src = thumbCanvas.toDataURL('image/png');
+        }
+      });
+    }
+
+    /* ===================== THUMBNAIL GENERATION ===================== */
+    function renderThumbnailsForInstance(gridEl, assignments, instGroupIds, instKey) {
+      if (!assignments.length || !thumbRenderer) return;
+      const allGroupIds = getDistinctGroupIds();
+      const allGidToIndex = new Map();
+      allGroupIds.forEach((gid, i) => allGidToIndex.set(gid, i));
+
+      for (const assignment of assignments) {
+        const fullAssignment = currentAssignment.slice();
+        instGroupIds.forEach((gid, i) => { fullAssignment[allGidToIndex.get(gid)] = assignment[i]; });
+        const colors = expandGroupAssignmentToParts(fullAssignment);
+
+        thumbRenderer.render(theta, phi, camDist, colors);
+        const dataURL = thumbCanvas.toDataURL('image/png');
+
+        const card = document.createElement('div');
+        card.className = 'thumb';
+        const isActive = instGroupIds.every((gid, i) =>
+          currentAssignment[allGidToIndex.get(gid)]?.hex === assignment[i].hex);
+        if (isActive) card.classList.add('active');
+
+        const img = document.createElement('img');
+        img.src = dataURL;
+        img.alt = assignment.map(c => c.name).join(' / ');
+
+        const labels = document.createElement('div');
+        labels.className = 'labels';
+        for (const c of assignment) {
+          const dot = document.createElement('span');
+          dot.className = 'dot';
+          dot.style.background = c.hex;
+          dot.title = c.name;
+          labels.append(dot);
+        }
+
+        card.append(img, labels);
+        card.addEventListener('click', () => {
+          instGroupIds.forEach((gid, i) => { currentAssignment[allGidToIndex.get(gid)] = assignment[i]; });
+          for (const sibling of gridEl.children) sibling.classList.remove('active');
+          card.classList.add('active');
+          renderInfoPanel();
+          renderSavedStrip();
+        });
+
+        gridEl.append(card);
+      }
+    }
+
+    function assignmentsEqual(a, b) {
+      if (!a || !b || a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) if (a[i].hex !== b[i].hex) return false;
+      return true;
+    }
+
+    /* ===================== SAVED SNAPSHOTS ===================== */
+    const savedSectionEl = document.getElementById('saved-section');
+    const savedStripEl = document.getElementById('saved-strip');
+    document.getElementById('save-current-btn').addEventListener('click', saveCurrentSnapshot);
+
+    function saveCurrentSnapshot() {
+      if (!parts.length || !currentAssignment) return;
+      const colors = currentColorsForRender();
+      thumbRenderer.render(theta, phi, camDist, colors);
+      const thumbnailDataURL = thumbCanvas.toDataURL('image/png');
+      snapshotCounter++;
+      savedSnapshots.push({
+        id: 's' + Date.now() + '-' + snapshotCounter,
+        name: `Combo ${snapshotCounter}`,
+        thumbnailDataURL,
+        selectedColorsSnapshot: selectedColors.slice(),
+        partGroupIdSnapshot: partGroupId.slice(),
+        currentAssignmentSnapshot: currentAssignment.slice(),
+      });
+      renderSavedStrip();
+    }
+
+    function restoreSnapshot(id) {
+      const s = savedSnapshots.find(x => x.id === id);
+      if (!s) return;
+      if (s.partGroupIdSnapshot.length !== parts.length) {
+        console.warn('Snapshot is from a different plate; ignoring restore.');
+        return;
+      }
+      selectedColors = s.selectedColorsSnapshot.slice();
+      partGroupId = s.partGroupIdSnapshot.slice();
+      currentAssignment = s.currentAssignmentSnapshot.slice();
+      selectedPartIndices.clear();
+      renderPalette();
+      renderSelectedStrip();
+      regenerateCombinations();
+      renderInfoPanel();
+      renderSavedStrip();
+    }
+
+    function deleteSnapshot(id) {
+      savedSnapshots = savedSnapshots.filter(s => s.id !== id);
+      renderSavedStrip();
+    }
+
+    function renameSnapshot(id) {
+      const s = savedSnapshots.find(x => x.id === id);
+      if (!s) return;
+      const newName = prompt('Name this combo:', s.name);
+      if (newName && newName.trim()) {
+        s.name = newName.trim();
+        renderSavedStrip();
+      }
+    }
+
+    function findActiveSnapshotId() {
+      if (!currentAssignment) return null;
+      for (const s of savedSnapshots) {
+        if (s.partGroupIdSnapshot.length !== partGroupId.length) continue;
+        if (s.currentAssignmentSnapshot.length !== currentAssignment.length) continue;
+        let match = true;
+        for (let i = 0; i < partGroupId.length; i++) {
+          if (s.partGroupIdSnapshot[i] !== partGroupId[i]) { match = false; break; }
+        }
+        if (!match) continue;
+        for (let i = 0; i < currentAssignment.length; i++) {
+          if (s.currentAssignmentSnapshot[i].hex !== currentAssignment[i].hex) { match = false; break; }
+        }
+        if (match) return s.id;
+      }
+      return null;
+    }
+
+    function renderSavedStrip() {
+      savedSectionEl.hidden = !parts.length;
+      if (!savedSnapshots.length) {
+        savedStripEl.innerHTML = '<div class="saved-empty muted">No saved combos yet. Click + Save current to capture the current colors.</div>';
+        return;
+      }
+      const activeId = findActiveSnapshotId();
+      savedStripEl.innerHTML = savedSnapshots.map(s =>
+        `<div class="saved-card ${s.id === activeId ? 'active' : ''}" data-id="${s.id}">
+           <img src="${s.thumbnailDataURL}" alt="${esc(s.name)}">
+           <div class="saved-card-footer">
+             <span class="saved-card-name" title="Click to rename">${esc(s.name)}</span>
+             <button class="saved-card-del" title="Delete">✕</button>
+           </div>
+         </div>`
+      ).join('');
+      for (const card of savedStripEl.querySelectorAll('.saved-card')) {
+        const id = card.dataset.id;
+        card.querySelector('img').addEventListener('click', () => restoreSnapshot(id));
+        card.querySelector('.saved-card-name').addEventListener('click', (e) => { e.stopPropagation(); renameSnapshot(id); });
+        card.querySelector('.saved-card-del').addEventListener('click', (e) => { e.stopPropagation(); deleteSnapshot(id); });
+      }
+    }
+
+    /* ===================== INFO PANEL ===================== */
+    let currentInfo = null; // { metadata, unit, dims, filename, totalV, totalT }
+
+    function renderInfoPanel() {
+      if (!currentInfo) { infoPanel.innerHTML = ''; return; }
+      const { metadata, unit, dims, filename, totalV, totalT, plateName } = currentInfo;
+      const rows = (obj, asHTML = false) => Object.entries(obj)
+        .map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td class="v">${asHTML ? renderMetaValue(v) : esc(v)}</td></tr>`)
+        .join('');
+
+      const geom = {
+        'Parts':     parts.length.toLocaleString(),
+        'Vertices':  totalV.toLocaleString(),
+        'Triangles': totalT.toLocaleString(),
+        [`W (${unit})`]: fmt(dims[0], ''),
+        [`H (${unit})`]: fmt(dims[1], ''),
+        [`D (${unit})`]: fmt(dims[2], ''),
+      };
+
+      // Build a (groupId → color) lookup for this render.
+      const groupIds = getDistinctGroupIds();
+      const gidToColor = new Map();
+      groupIds.forEach((gid, idx) => gidToColor.set(gid, currentAssignment ? currentAssignment[idx] : null));
+
+      // Group parts by parent object for the panel.
+      const objectGroups = new Map();
+      for (let i = 0; i < parts.length; i++) {
+        const key = parts[i].objectName || '—';
+        if (!objectGroups.has(key)) objectGroups.set(key, []);
+        objectGroups.get(key).push({ part: parts[i], index: i });
+      }
+      const partsHTML = [...objectGroups.entries()].map(([objName, items]) =>
+        `<details open class="part-group">
+           <summary>${esc(objName)} <span class="muted">(${items.length})</span></summary>
+           <ul class="part-list">
+             ${items.map(({part, index}) => {
+                const c = gidToColor.get(partGroupId[index]);
+                const colorName = c ? c.name : '— neutral —';
+                const swatch = c
+                  ? `<span class="color-dot" style="background:${c.hex}"></span>`
+                  : `<span class="color-dot" style="background:repeating-linear-gradient(45deg,#30363d,#30363d 4px,#21262d 4px,#21262d 8px)"></span>`;
+                const inMulti = isPartInMultiGroup(index);
+                const inGroupCls = inMulti ? ' in-group' : '';
+                const groupColor = c ? c.hex : '#30363d';
+                const checked = selectedPartIndices.has(index) ? 'checked' : '';
+                return `<li class="${inGroupCls}" style="--group-color:${groupColor}">
+                  <input type="checkbox" ${checked} onchange="togglePartSelection(${index}, this.checked)">
+                  <span class="name" title="${esc(part.name)}">${esc(part.name)}</span>
+                  <span class="color-name">${swatch}${esc(colorName)}</span>
+                </li>`;
+             }).join('')}
+           </ul>
+         </details>`
+      ).join('');
+
+      // Action bar (visible only when something is selected).
+      let actionBarHTML = '';
+      if (selectedPartIndices.size > 0) {
+        const touchedGids = new Set();
+        for (const i of selectedPartIndices) touchedGids.add(partGroupId[i]);
+        const canGroup = touchedGids.size >= 2;
+        const canUngroup = [...selectedPartIndices].some(i => isPartInMultiGroup(i));
+        actionBarHTML = `
+          <div class="action-bar">
+            <span class="muted">${selectedPartIndices.size} selected · click a palette color to paint them</span>
+            <button onclick="groupSelected()" ${canGroup ? '' : 'disabled'}>Group</button>
+            <button onclick="ungroupSelected()" ${canUngroup ? '' : 'disabled'}>Ungroup</button>
+            <button onclick="clearPartSelection()">Clear</button>
+          </div>`;
+      }
+
+      const partsHeading = plateName ? `Parts on ${esc(plateName)}` : 'Parts &amp; current colors';
+
+      const metaSection = Object.keys(metadata).length ? `
+        <hr class="info-divider">
+        <div class="info-section">
+          <div class="info-section-title">Metadata</div>
+          <table class="info-table">${rows(metadata, true)}</table>
+        </div>` : '';
+
+      infoPanel.innerHTML = `
+        <div class="info-section">
+          <div class="info-section-title">File</div>
+          <div style="color:#e6edf3;word-break:break-all;line-height:1.4">${esc(filename)}</div>
+        </div>
+        <hr class="info-divider">
+        <div class="info-section">
+          <div class="info-section-title">Geometry</div>
+          <table class="info-table">${rows(geom)}</table>
+        </div>
+        <hr class="info-divider">
+        <div class="info-section">
+          <div class="info-section-title">${partsHeading}</div>
+          ${actionBarHTML}
+          ${partsHTML}
+        </div>
+        ${metaSection}
+      `;
+    }
+
+    /* ===================== MAIN LOAD ===================== */
+    function showPlate(plateId) {
+      if (!scene) return;
+      const plate = scene.plates.find(p => p.id === plateId);
+      if (!plate) return;
+      activePlateId = plateId;
+      // Plate switch invalidates snapshots — partGroupId/parts identity changes.
+      savedSnapshots = [];
+      snapshotCounter = 0;
+
+      const rawParts = [];
+      let instanceIdx = 0;
+      for (const inst of plate.instances) {
+        const instanceKey = `${plate.id}#${instanceIdx++}#${inst.objectId}`;
+        for (const part of inst.parts) {
+          rawParts.push({
+            name: part.name,
+            objectName: inst.objectName,
+            instanceKey,
+            extruder: part.extruder,
+            vertices: part.vertices,
+            triangles: part.triangles,
+          });
+        }
+      }
+      if (!rawParts.length) { setError('Selected plate has no geometry.'); return; }
+
+      const processed = processParts(rawParts);
+      parts = processed.parts;
+      parts.forEach((pp, i) => {
+        pp.objectName = rawParts[i].objectName;
+        pp.extruder = rawParts[i].extruder;
+        pp.instanceKey = rawParts[i].instanceKey;
+      });
+
+      currentInfo = {
+        metadata: scene.metadata,
+        unit: scene.unit,
+        dims: processed.dims,
+        filename: scene.filename,
+        totalV: processed.totalV,
+        totalT: processed.totalT,
+        plateName: plate.name,
+      };
+
+      // Reset grouping state for this plate (each part starts as its own group).
+      partGroupId = parts.map((_, i) => i);
+      selectedPartIndices = new Set();
+
+      mainRenderer.uploadParts(parts);
+      thumbRenderer.uploadParts(parts);
+      theta = 0.4; phi = 0.2; camDist = 4.0;
+      if (rafId) cancelAnimationFrame(rafId);
+      renderLoop();
+
+      seedColors();
+      regenerateCombinations();
+    }
+
+    // Curated high-contrast subset of BAMBU_PLA for files without filament_colour info.
+    const CONTRAST_DEFAULTS_HEX = ['#000000', '#FFFFFF', '#C12E1F', '#0086D6']; // Black, White, Red, Cyan
+
+    function resolvePaletteEntry(hex) {
+      const upper = hex.toUpperCase();
+      const match = BAMBU_PLA.find(c => c.hex.toUpperCase() === upper);
+      if (match) return match;
+      const r = parseInt(hex.slice(1,3), 16), g = parseInt(hex.slice(3,5), 16), b = parseInt(hex.slice(5,7), 16);
+      const lum = (0.2126*r + 0.7152*g + 0.0722*b) / 255;
+      return { name: upper, hex: upper, light: lum > 0.5 };
+    }
+
+    function seedColors() {
+      const filaments = (scene && scene.filamentColors) || [];
+      let seeds;
+      if (filaments.length) {
+        seeds = filaments.slice(0, MAX_COLORS).map(resolvePaletteEntry);
+      } else {
+        let maxExtruder = 0;
+        for (const p of parts) if (p.extruder && p.extruder > maxExtruder) maxExtruder = p.extruder;
+        const count = maxExtruder ? Math.min(maxExtruder, MAX_COLORS) : MAX_COLORS;
+        seeds = CONTRAST_DEFAULTS_HEX.slice(0, count).map(resolvePaletteEntry);
+      }
+      selectedColors = seeds;
+
+      const groupIds = getDistinctGroupIds();
+      currentAssignment = groupIds.map(gid => {
+        const firstPartIdx = partGroupId.indexOf(gid);
+        const ext = parts[firstPartIdx]?.extruder;
+        if (!ext) return selectedColors[0];
+        return selectedColors[Math.min(ext - 1, selectedColors.length - 1)];
+      });
+
+      renderPalette();
+      renderSelectedStrip();
+    }
+
+    function renderPlateTabs() {
+      const el = document.getElementById('plateTabs');
+      if (!scene || scene.plates.length < 2) {
+        el.innerHTML = '';
+        el.style.display = 'none';
+        return;
+      }
+      el.style.display = '';
+      el.innerHTML = scene.plates.map(p =>
+        `<button class="plate-tab ${p.id === activePlateId ? 'active' : ''}" data-id="${p.id}">
+           ${esc(p.name)} <span class="muted">(${p.instances.length})</span>
+         </button>`
+      ).join('');
+      for (const b of el.querySelectorAll('button')) {
+        b.addEventListener('click', () => {
+          const id = parseInt(b.dataset.id, 10);
+          showPlate(id);
+          renderPlateTabs();
+          renderInfoPanel();
+        });
+      }
+    }
+
+    async function loadFile(file) {
+      setError('');
+      scene = null;
+      activePlateId = null;
+      savedSnapshots = [];
+      snapshotCounter = 0;
+      dropLabel.textContent = 'Parsing…';
+      dropZone.style.pointerEvents = 'none';
+      try {
+        const buffer = await file.arrayBuffer();
+        scene = await window.Scene3MF.parseScene(buffer);
+        scene.filename = file.name;
+        if (!scene.plates.length) throw new Error('No printable geometry in archive.');
+
+        if (!mainRenderer) { viewerArea.hidden = false; mainRenderer = createRenderer(canvas); }
+        if (!thumbRenderer) {
+          thumbRenderer = createRenderer(thumbCanvas, { preserveDrawingBuffer: true });
+          thumbRenderer.resizeIfNeeded = () => {};
+        }
+
+        activePlateId = scene.plates[0].id;
+        showPlate(activePlateId);
+        viewerArea.hidden = false;
+        dropZone.hidden = true;
+        renderPlateTabs();
+        filenameEl.textContent = file.name;
+        renderInfoPanel();
+      } catch (err) {
+        setError(err.message);
+        viewerArea.hidden = true;
+        dropZone.hidden = false;
+        console.error(err);
+      } finally {
+        dropLabel.textContent = 'Drop a .3mf file here';
+        dropZone.style.pointerEvents = '';
+      }
+    }
+  </script>
+</body>
+</html>

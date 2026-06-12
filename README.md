@@ -30,7 +30,7 @@ tool-protos/
 2. **Fill in the metadata** (in `<head>`)
    ```html
    <meta name="description" content="One sentence about what this does.">
-   <meta name="date" content="2026-04-10">
+   <meta name="date" content="YYYY-MM-DD">
    <meta name="tags" content="tag1, tag2">
    <title>Your Experiment Title</title>
    ```
@@ -42,7 +42,7 @@ tool-protos/
 
 4. **Build the experiment** in `<main>` using vanilla HTML + JS only. No `import`, no CDN scripts — everything inline.
 
-5. **Commit and push to `main`**. GitHub Actions deploys automatically. The experiment appears on the index on the next page load.
+5. **Commit and push to `main`**. GitHub Actions deploys automatically. The index page auto-discovers all `.html` files in `experiments/` (except those starting with `_`) via the GitHub API, so no manual registration is needed — the experiment will appear on the next page load.
 
 ## Rules / conventions
 
