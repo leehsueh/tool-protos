@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="An 8-bit pixel adventure that teaches git to non-technical people by treating it as time travel across parallel timelines.">
+  <meta name="description" content="An 8-bit pixel adventure that teaches git to non-technical people by treating it as time travel across parallel timelines — 3 worlds, 10 levels, from your first save point to remote teamwork (push/pull).">
   <meta name="date" content="2026-05-30">
   <meta name="tags" content="game, git, education, pixel-art, canvas">
   <title>Git Time Traveler</title>
@@ -210,10 +210,10 @@
       <p><strong>Git Time Traveler</strong> teaches git to a non-technical person by leaning on one metaphor that happens to be technically accurate: <em>git is a time machine with parallel timelines</em>. You build a little pixel world (the "working directory"), place the parts you want to keep on the <em>Staging Altar</em>, and stamp a <em>Save Point</em> (a commit). The growing pixel timeline graph is the real commit history.</p>
 
       <h2>How to use</h2>
-      <p>Pick a level. Read the quest, then change the world with the <strong>World Editor</strong> buttons, <strong>Stage</strong> what you want to keep, and create a <strong>Save Point</strong>. Later worlds unlock <strong>branches</strong> (parallel timelines), <strong>merging</strong>, and <strong>conflict</strong> resolution. From World 2 on, a real-command terminal unlocks so you can graduate from buttons to typing actual <code>git</code> commands. Every action also prints the equivalent real command into the <strong>Command Log</strong>. Progress and stars are saved in your browser.</p>
+      <p>Pick a level. Read the quest, then change the world with the <strong>World Editor</strong> buttons, <strong>Stage</strong> what you want to keep, and create a <strong>Save Point</strong>. Across <strong>3 worlds (10 levels)</strong> you unlock <strong>branches</strong> (parallel timelines), <strong>merging</strong> and <strong>conflict</strong> resolution, and finally the collaborative loop — a <strong>remote</strong> "Cloud Mirror" you <strong>push</strong>, <strong>fetch</strong> and <strong>pull</strong> with a teammate. From World 2 on, a real-command terminal unlocks so you can graduate from buttons to typing actual <code>git</code> commands. Every action also prints the equivalent real command into the <strong>Command Log</strong>. Progress and stars are saved in your browser.</p>
 
       <h2>Technical details</h2>
-      <p>A small but faithful in-memory git engine (commits with parent links, branches, HEAD, working tree, staging index, fast-forward + 3-way merge with conflict detection via a common-ancestor diff) drives the whole game; level objectives are validated against the real engine state, not scripted. Everything renders to two <code>&lt;canvas&gt;</code> elements with hand-drawn pixel art. Pure vanilla HTML/CSS/JS, no imports, single file.</p>
+      <p>A small but faithful in-memory git engine (commits with parent links, branches, HEAD, working tree, staging index, fast-forward + 3-way merge with conflict detection via a common-ancestor diff, plus a second commit store standing in for a <em>remote</em> with origin/* tracking refs and push/fetch/pull) drives the whole game; level objectives are validated against the real engine state, not scripted. Everything renders to two <code>&lt;canvas&gt;</code> elements with hand-drawn pixel art. Pure vanilla HTML/CSS/JS, no imports, single file.</p>
     </div>
   </details>
 
@@ -229,7 +229,7 @@
         <button class="btn gold" id="startBtn">&#9654; START QUEST</button>
         <button class="btn" id="glosBtn1">GLOSSARY</button>
       </div>
-      <p class="center" style="color:var(--dim); font-size:.72rem; margin-top:1rem;">No git knowledge needed. You'll be fluent in 7 levels.</p>
+      <p class="center" style="color:var(--dim); font-size:.72rem; margin-top:1rem;">No git knowledge needed. You'll be fluent in 10 levels.</p>
     </section>
 
     <!-- LEVEL SELECT -->
@@ -379,7 +379,11 @@
 
   /* ---------- git engine ---------- */
   function newRepo(){
-    return { commits:{}, seq:0, branches:{}, HEAD:{branch:'main'}, work:{}, index:{} };
+    // remote = the "Cloud Mirror" (origin): its own copy of commits + branch tips.
+    // remoteTracking = local memory of where origin's branches were last seen
+    // (e.g. 'origin/main'), updated by fetch/pull/push.
+    return { commits:{}, seq:0, branches:{}, HEAD:{branch:'main'}, work:{}, index:{},
+             remote:null, remoteTracking:{} };
   }
   function headCommitId(r){
     return r.HEAD.branch ? (r.branches[r.HEAD.branch] || null) : r.HEAD.detached;
@@ -436,7 +440,9 @@
      actions unlocked, setup(repo), goals[], hints[].
      ============================================================ */
   const ACT = { edit:'edit', stage:'stage', commit:'commit', travel:'travel', discard:'discard',
-                revert:'revert', branch:'branch', switch:'switch', merge:'merge' };
+                revert:'revert', branch:'branch', switch:'switch', merge:'merge',
+                /* World 3 — collaboration */
+                remote:'remote', push:'push', fetch:'fetch', pull:'pull' };
 
   /* The garden is ONE evolving place. Each level's `enter` is the canonical
      state of the garden when that level begins (used when you jump in from the
@@ -644,7 +650,112 @@
         "A paradox popup appears for sky (sunset vs night). The flowers merge automatically — only the sky truly clashes. Pick the sky you want.",
         "Choosing a side and sealing it creates a special merge save point with TWO parents."
       ],
-      done:"You resolved a real merge conflict — the thing that scares most beginners. You are now git-fluent. The shared-world (remote/teamwork) worlds await in a future update!"
+      done:"You resolved a real merge conflict — the thing that scares most beginners. Next: leave your private timelines behind and share your world with a whole team."
+    },
+
+    /* ---------- WORLD 3 — The Shared World (remote / push / pull / teamwork) ---------- */
+    {
+      n:8, world:3, name:'The Cloud Mirror', termHint:true,
+      enter:{ sky:'night', tree:'tree', flowers:'red', creature:'dragon' },
+      intro:[
+        "GUIDE: Your garden is glorious — time to share it. A <span class='say'>remote</span> is a <b>Cloud Mirror</b>: a copy of your timelines that other travelers (your team) can also reach. The usual one is named <b>origin</b>.",
+        "First <b>connect</b> the Cloud Mirror, then <b>push</b> your <b>main</b> timeline up to it.",
+        "After pushing, a new marker <b>origin/main</b> appears on the Timeline — it shows where the shared copy is. Get it to sit on the same save point as your local main."
+      ],
+      editable:[],
+      actions:[ACT.remote,ACT.push,ACT.fetch,ACT.travel],
+      setup(r, base){
+        const a=makeCommit(r,[],clone(base),'our beautiful garden'); r.branches.main=a;
+        const h=headTree(r); r.work=clone(h); r.index=clone(h);
+        // no remote yet — the player connects it
+      },
+      goals:[
+        { id:'connect', label:'Connect the Cloud Mirror (git remote add origin)', test:(r)=>!!r.remote },
+        { id:'pushed', label:'Push main up to the Mirror', test:(r)=> !!r.remote && r.remote.branches.main===r.branches.main && !!r.branches.main },
+        { id:'insync', label:'origin/main now matches your local main', test:(r)=> r.remoteTracking['origin/main'] && r.remoteTracking['origin/main']===r.branches.main },
+      ],
+      hints:[
+        "Click CONNECT MIRROR (or type: git remote add origin ...). That creates 'origin'.",
+        "Click PUSH (or: git push). Your save points upload to the shared copy.",
+        "Watch the Timeline: an origin/main tag lands on the same dot as main. That means the team can now see your garden."
+      ],
+      done:"Your garden lives in the Cloud Mirror now. 'origin' is the shared copy; 'push' uploads your save points so teammates can reach them."
+    },
+    {
+      n:9, world:3, name:'Catching Up', termHint:true,
+      enter:{ sky:'night', tree:'tree', flowers:'red', creature:'dragon' },
+      intro:[
+        "GUIDE: While you slept, a teammate added <b>blossoms</b> to the shared garden and pushed them to the Cloud Mirror. Your local copy hasn't caught up yet.",
+        "Use <b>Fetch</b> to peek at what's new (it downloads without changing your garden), then <b>Pull</b> to bring it down. Because you made no conflicting changes, this is a clean <span class='say'>fast-forward</span>.",
+        "Notice <b>origin/main</b> already sits ahead of your <b>main</b> — pull catches you up."
+      ],
+      editable:[],
+      actions:[ACT.fetch,ACT.pull,ACT.push,ACT.travel],
+      setup(r, base){
+        const a=makeCommit(r,[],clone(base),'our beautiful garden'); r.branches.main=a;
+        // remote already exists and is AHEAD: teammate pushed a blossom commit.
+        const rem=ensureRemote(r);
+        copyHistory(r.commits, rem.commits, a);
+        const teammateTree=Object.assign(clone(r.commits[a].tree),{tree:'blossom'});
+        const b=makeCommit(r,[a],teammateTree,'teammate: the tree blossoms'); // lands in r.commits
+        rem.commits[b]=clone(r.commits[b]);
+        rem.branches.main=b;
+        // we already pushed `a` earlier, so our tracking knows origin used to be at `a`.
+        r.remoteTracking['origin/main']=a;
+        const h=headTree(r); r.work=clone(h); r.index=clone(h);
+      },
+      goals:[
+        { id:'fetched', label:'Fetch to see the teammate’s work (origin/main moves ahead)', test:(r,f)=>f.didFetch || (r.remote && r.remoteTracking['origin/main']===r.remote.branches.main && r.remoteTracking['origin/main']!==undefined) },
+        { id:'pulled', label:'Pull to fast-forward your main up to the team', test:(r)=> r.remote && r.branches.main===r.remote.branches.main && headTree(r).tree==='blossom' },
+      ],
+      hints:[
+        "Click FETCH (or: git fetch). The origin/main marker jumps ahead of your main — that's the teammate's new save point.",
+        "Click PULL (or: git pull). Your main slides up to meet origin/main — a fast-forward.",
+        "Your garden's tree is now in blossom, matching the shared copy."
+      ],
+      done:"You caught up with the team. 'fetch' downloads news without touching your work; 'pull' fetches AND merges it in — here a clean fast-forward."
+    },
+    {
+      n:10, world:3, name:'Teamwork', termHint:true,
+      enter:{ sky:'night', tree:'blossom', flowers:'red', creature:'dragon' },
+      intro:[
+        "GUIDE: The capstone — the real collaborative loop. You'll change the garden's <b>sky</b> locally. Meanwhile a teammate ALSO changed the sky and pushed it first.",
+        "Make your change &amp; save it, then <b>push</b>. It gets <span class='say'>rejected</span> (non-fast-forward) — the Mirror moved on without you.",
+        "<b>Pull</b> to bring their work down. You both touched the sky, so it's a <span class='say'>paradox</span> — resolve it. Then <b>push</b> again to complete the loop."
+      ],
+      editable:['sky'],
+      actions:[ACT.edit,ACT.stage,ACT.commit,ACT.push,ACT.fetch,ACT.pull],
+      setup(r, base){
+        const start=Object.assign(clone(base),{sky:'sunset'});
+        const a=makeCommit(r,[],start,'shared garden at sunset'); r.branches.main=a;
+        // we are already in sync with origin at `a`...
+        const rem=ensureRemote(r);
+        copyHistory(r.commits, rem.commits, a);
+        rem.branches.main=a;
+        r.remoteTracking['origin/main']=a;
+        // ...but a teammate has since pushed a NIGHT sky on top of `a`.
+        const theirTree=Object.assign(clone(start),{sky:'night'});
+        const b=makeCommit(r,[a],theirTree,'teammate: turned the sky to night');
+        rem.commits[b]=clone(r.commits[b]);
+        rem.branches.main=b;
+        // crucially, our local tracking still thinks origin is at `a` (we haven't fetched)
+        r.remoteTracking['origin/main']=a;
+        // reset working tree to our local tip `a`
+        r.branches.main=a;
+        const h=headTree(r); r.work=clone(h); r.index=clone(h);
+        G.l10base=a;
+      },
+      goals:[
+        { id:'localchange', label:'Change the sky locally and save it', test:(r)=> r.branches.main && r.branches.main!==G.l10base && r.commits[r.branches.main] && r.commits[r.branches.main].parents.length===1 || (r.branches.main && r.commits[r.branches.main] && r.commits[r.branches.main].parents.length===2) },
+        { id:'resolved', label:'Pull and resolve the sky paradox (a 2-parent merge save point)', test:(r)=>{ const id=r.branches.main; return id && r.commits[id] && r.commits[id].parents.length===2; } },
+        { id:'pushed', label:'Push the merged result — the loop is complete', test:(r)=> r.remote && r.remote.branches.main===r.branches.main && r.commits[r.branches.main] && r.commits[r.branches.main].parents.length===2 },
+      ],
+      hints:[
+        "Set sky to anything but night (e.g. storm or day), STAGE sky.txt, SAVE POINT. Then PUSH — it gets REJECTED because the teammate pushed first.",
+        "Click PULL. Because you both changed the sky, a PARADOX popup appears. Pick the sky you want and seal it — that makes a merge save point with TWO parents.",
+        "Now PUSH again. This time it succeeds and origin/main catches up to your merge. Loop complete!"
+      ],
+      done:"You ran the full team loop: commit, get rejected, pull, resolve a real conflict, and push. This is exactly how professionals collaborate every day. You are git-fluent."
     },
   ];
 
@@ -746,7 +857,12 @@
       if(merge){ ctx.fillStyle='#000'; ctx.fillRect(x-2,y-2,4,4); }
       if(id===hcid){ ctx.strokeStyle='#ffd866'; ctx.lineWidth=2.5; ctx.strokeRect(x-11,y-11,22,22); }
     });
-    // branch labels at tips — larger, sharp, with a readable backing
+    // branch labels at tips — larger, sharp, with a readable backing.
+    // remote-tracking refs (e.g. origin/main) ride just below the local label
+    // for the same dot, in a gold "Cloud Mirror" colour so the shared copy's
+    // position is always visible.
+    const remoteByCommit={};
+    Object.keys(r.remoteTracking||{}).forEach(rt=>{ const id=r.remoteTracking[rt]; if(id){ (remoteByCommit[id]=remoteByCommit[id]||[]).push(rt); } });
     ctx.font='bold '+fontStack; ctx.textBaseline='middle';
     bnames.forEach(bn=>{ const id=r.branches[bn]; if(!id||!pos[id])return; const {x,y}=pos[id];
       const here=r.HEAD.branch===bn;
@@ -754,6 +870,17 @@
       const lx=x+14;
       ctx.fillStyle=branchColors[bn]||'#8df8ff';
       ctx.fillText(lbl, lx, y);
+      // stack any origin/* tag for this dot underneath the branch name
+      if(remoteByCommit[id]){
+        ctx.fillStyle='#ffd866';
+        ctx.fillText('☁ '+remoteByCommit[id].join(' '), lx, y+15);
+        delete remoteByCommit[id];
+      }
+    });
+    // origin/* refs that don't share a dot with a local branch tip (e.g. when
+    // origin/main is ahead of you after a fetch) still get drawn on their dot.
+    Object.keys(remoteByCommit).forEach(id=>{ if(!pos[id])return; const {x,y}=pos[id];
+      ctx.fillStyle='#ffd866'; ctx.fillText('☁ '+remoteByCommit[id].join(' '), x+14, y);
     });
     // detached HEAD marker
     if(!r.HEAD.branch && pos[r.HEAD.detached]){ const {x,y}=pos[r.HEAD.detached];
@@ -880,6 +1007,158 @@
   }
 
   /* ============================================================
+     REMOTE ENGINE  (World 3 — the "Cloud Mirror" / origin)
+     A remote is just another little timeline-store that other travelers can
+     also reach. We copy commits across by id (ids are globally unique within a
+     play session) so push/fetch never lose lineage.
+     ============================================================ */
+
+  /* copy a commit + all of its missing ancestors from `from` store into `to`. */
+  function copyHistory(fromCommits, toCommits, tip){
+    if(!tip) return;
+    const stack=[tip];
+    while(stack.length){
+      const id=stack.pop();
+      if(!id || toCommits[id] || !fromCommits[id]) continue;
+      toCommits[id]=clone(fromCommits[id]);
+      fromCommits[id].parents.forEach(p=>stack.push(p));
+    }
+  }
+
+  /* ensure a remote exists (lazily); origin starts empty until first push. */
+  function ensureRemote(r){
+    if(!r.remote) r.remote={ branches:{}, commits:{} };
+    return r.remote;
+  }
+
+  /* PUSH (pure core) — send current branch up to origin.
+     Returns {ok, status, branch, reason}. status: 'ok' | 'uptodate' | 'rejected' | 'nobranch' | 'noremote'. */
+  function doPushCore(r){
+    if(!r.remote) return { ok:false, status:'noremote' };
+    if(!r.HEAD.branch) return { ok:false, status:'nobranch' };
+    const branch=r.HEAD.branch;
+    const localTip=r.branches[branch];
+    const remoteTip=r.remote.branches[branch];
+    if(remoteTip===localTip) return { ok:true, status:'uptodate', branch };
+    // reject a non-fast-forward push: origin has work we don't have locally yet.
+    if(remoteTip && !isAncestor(r, remoteTip, localTip)){
+      return { ok:false, status:'rejected', branch, reason:'remote has commits you do not have — pull first' };
+    }
+    copyHistory(r.commits, r.remote.commits, localTip);
+    r.remote.branches[branch]=localTip;
+    r.remoteTracking['origin/'+branch]=localTip;
+    return { ok:true, status:'ok', branch };
+  }
+
+  /* FETCH (pure core) — pull origin's commits into our store + update tracking
+     refs, WITHOUT moving any local branch. Returns {ok, updated[]}. */
+  function doFetchCore(r){
+    if(!r.remote) return { ok:false, status:'noremote' };
+    const updated=[];
+    Object.keys(r.remote.branches).forEach(bn=>{
+      const tip=r.remote.branches[bn];
+      copyHistory(r.remote.commits, r.commits, tip);
+      if(r.remoteTracking['origin/'+bn]!==tip){ updated.push(bn); }
+      r.remoteTracking['origin/'+bn]=tip;
+    });
+    return { ok:true, status:'ok', updated };
+  }
+
+  /* PULL (pure core) — fetch, then integrate origin/<branch> into the current
+     branch. Returns a descriptor the UI acts on:
+       {status:'uptodate'|'ff'|'merged'|'conflict'|...}
+     For 'conflict', returns the same shape doMerge builds so the existing
+     paradox overlay can finish the job. */
+  function doPullCore(r){
+    if(!r.remote) return { ok:false, status:'noremote' };
+    if(!r.HEAD.branch) return { ok:false, status:'nobranch' };
+    doFetchCore(r);
+    const branch=r.HEAD.branch;
+    const ours=r.branches[branch];
+    const theirs=r.remoteTracking['origin/'+branch];
+    if(!theirs) return { ok:true, status:'noupstream', branch };
+    if(theirs===ours || isAncestor(r, theirs, ours)) return { ok:true, status:'uptodate', branch };
+    if(isAncestor(r, ours, theirs)){
+      // fast-forward: just slide our branch up to origin's tip.
+      r.branches[branch]=theirs;
+      return { ok:true, status:'ff', branch, theirs };
+    }
+    // diverged — real 3-way merge against origin/<branch> (same logic as doMerge).
+    const base=mergeBase(r, ours, theirs);
+    const bT=base?r.commits[base].tree:{}, oT=r.commits[ours].tree, tT=r.commits[theirs].tree;
+    const merged={}, conflicts=[];
+    const keys=new Set([...Object.keys(oT),...Object.keys(tT),...Object.keys(bT)]);
+    keys.forEach(k=>{
+      const b=bT[k], o=oT[k], t=tT[k];
+      if(o===t){ merged[k]=o; }
+      else if(o===b){ merged[k]=t; }
+      else if(t===b){ merged[k]=o; }
+      else { conflicts.push({knob:k, ours:o, theirs:t}); merged[k]=o; }
+    });
+    if(!conflicts.length){
+      const nid=makeCommit(r,[ours,theirs], merged, "Merge origin/"+branch);
+      r.branches[branch]=nid;
+      return { ok:true, status:'merged', branch, id:nid, merged };
+    }
+    return { ok:true, status:'conflict', branch, ours, theirs, merged, conflicts };
+  }
+
+  /* ---- UI wrappers (buttons + terminal share these) ---- */
+  function doConnectRemote(){
+    const r=G.repo;
+    if(r.remote){ toast('Cloud Mirror already connected.',true); return; }
+    ensureRemote(r);
+    logCmd('git remote add origin <cloud-mirror>', "Connected the Cloud Mirror as 'origin'.");
+    toast('Cloud Mirror connected as origin.');
+  }
+  function doPush(){
+    const r=G.repo;
+    if(!r.remote){ toast('No Cloud Mirror yet — connect one first.',true); return; }
+    const res=doPushCore(r);
+    if(res.status==='uptodate'){ logCmd('git push','Everything up-to-date.'); toast('Already up to date.'); return; }
+    if(res.status==='nobranch'){ toast("You're in the past (detached). Switch to a branch first.",true); return; }
+    if(res.status==='rejected'){
+      logCmd('git push', '! [rejected] '+res.branch+' (non-fast-forward)\nhint: pull the Cloud Mirror first, then push.');
+      toast('Push rejected — teammate is ahead. Pull first!',true); return;
+    }
+    logCmd('git push -u origin '+res.branch, "To origin\n   "+res.branch+" -> "+res.branch);
+    toast('Pushed to the Cloud Mirror!');
+  }
+  function doFetch(){
+    const r=G.repo;
+    if(!r.remote){ toast('No Cloud Mirror to fetch from.',true); return; }
+    const res=doFetchCore(r);
+    G.flags.didFetch=true;
+    logCmd('git fetch', res.updated.length?('Fetched: '+res.updated.map(b=>'origin/'+b).join(', ')):'Already up to date.');
+    toast(res.updated.length?'Fetched new save points from the Mirror.':'Nothing new to fetch.');
+  }
+  function doPull(){
+    const r=G.repo;
+    if(!r.remote){ toast('No Cloud Mirror to pull from.',true); return; }
+    const res=doPullCore(r);
+    if(res.status==='nobranch'){ toast("You're in the past (detached). Switch to a branch first.",true); return; }
+    if(res.status==='noupstream'){ logCmd('git pull','No upstream on the Mirror yet.'); toast('Nothing on the Mirror for this timeline.',true); return; }
+    if(res.status==='uptodate'){ logCmd('git pull','Already up to date.'); toast('Already up to date.'); return; }
+    if(res.status==='ff'){
+      const h=headTree(r); r.work=clone(h); r.index=clone(h);
+      logCmd('git pull', 'Fast-forward. Updated '+res.branch+' to origin/'+res.branch);
+      toast('Pulled (fast-forward) — caught up with the team!'); return;
+    }
+    if(res.status==='merged'){
+      const h=headTree(r); r.work=clone(h); r.index=clone(h);
+      logCmd('git pull', 'Merge made by the recursive strategy. ('+res.id+')');
+      toast('Pulled and merged cleanly!'); return;
+    }
+    if(res.status==='conflict'){
+      // hand off to the existing paradox overlay; "theirs" is origin/<branch>.
+      logCmd('git pull', 'CONFLICT: '+res.conflicts.map(c=>FILE_OF[c.knob]||c.knob).join(', '));
+      G.pendingConflict={ name:'origin/'+res.branch, ours:res.ours, theirs:res.theirs,
+                          merged:res.merged, conflicts:res.conflicts, choices:{} };
+      openConflict();
+    }
+  }
+
+  /* ============================================================
      UI WIRING
      ============================================================ */
   function show(screen){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); $('#'+screen).classList.add('active'); }
@@ -889,7 +1168,7 @@
     let curWorld=0;
     LEVELS.forEach(L=>{
       if(L.world!==curWorld){ curWorld=L.world; const h=document.createElement('div'); h.className='world-h';
-        h.textContent='WORLD '+L.world+' — '+(L.world===1?'The Basics of Time':'Parallel Timelines'); host.appendChild(h);
+        h.textContent='WORLD '+L.world+' — '+(L.world===1?'The Basics of Time':L.world===2?'Parallel Timelines':'The Shared World'); host.appendChild(h);
         const g=document.createElement('div'); g.className='levelgrid'; g.id='wg'+L.world; host.appendChild(g);
       }
       const g=$('#wg'+L.world);
@@ -976,6 +1255,19 @@
     }
     if(actionAllowed(ACT.merge)){
       add('&#10515; MERGE','git merge','green', openMerge, true);
+    }
+    /* World 3 — the Cloud Mirror (remote) */
+    if(actionAllowed(ACT.remote)){
+      add('&#9729; CONNECT MIRROR','git remote add','', ()=>{ doConnectRemote(); refresh(); }, !G.repo.remote);
+    }
+    if(actionAllowed(ACT.fetch)){
+      add('&#8615; FETCH','git fetch','', ()=>{ doFetch(); refresh(); }, !!G.repo.remote);
+    }
+    if(actionAllowed(ACT.pull)){
+      add('&#8681; PULL','git pull','green', ()=>{ doPull(); refresh(); }, !!G.repo.remote);
+    }
+    if(actionAllowed(ACT.push)){
+      add('&#8679; PUSH','git push','gold', ()=>{ doPush(); refresh(); }, !!G.repo.remote);
     }
   }
 
@@ -1106,6 +1398,17 @@
         else { toast('Unknown target: '+name,true); }
       } else if(cmd==='merge'){ doMerge(rest);
       } else if(cmd==='revert'){ doRevert(rest);
+      } else if(cmd==='remote'){
+        // git remote add origin <url>  (any 'add origin ...' connects the Mirror)
+        if(/^add\s+origin/.test(rest)) doConnectRemote();
+        else if(!rest||rest==='-v'){ logCmd(line, r.remote?'origin  (the Cloud Mirror)':'(no remote connected)'); }
+        else { toast('Only "git remote add origin ..." is supported.',true); logCmd(line,'unsupported remote command'); }
+      } else if(cmd==='clone'){
+        // we don't model cloning from scratch; treat as connect-the-mirror for parity.
+        doConnectRemote();
+      } else if(cmd==='push'){ doPush();
+      } else if(cmd==='fetch'){ doFetch();
+      } else if(cmd==='pull'){ doPull();
       } else if(cmd==='status'){ logCmd(line, 'staged: '+(staged(r).map(k=>FILE_OF[k]).join(', ')||'none')+'\nmodified: '+(unstaged(r).map(k=>FILE_OF[k]).join(', ')||'none')+'\non: '+(r.HEAD.branch||'(past)'));
       } else if(cmd==='log'){ const ids=Object.keys(r.commits).sort((a,b)=>r.commits[b].n-r.commits[a].n); logCmd(line, ids.map(id=>id+' '+r.commits[id].message).join('\n')||'no commits');
       } else { logCmd(line,'command not supported in this game'); }
@@ -1204,6 +1507,14 @@
     ['Merge conflict (paradox)','When two timelines changed the SAME thing differently and git needs you to choose.'],
     ['Revert','A safe undo: a NEW save point that cancels out an earlier one, without erasing history.'],
     ['Fast-forward','A merge so simple git just slides the marker forward — no real combining needed.'],
+    ['Remote (Cloud Mirror)','A shared copy of your timelines that lives elsewhere so a whole team can reach it.'],
+    ['origin','The usual name for your main remote — the Cloud Mirror you push to and pull from.'],
+    ['origin/main','A read-only marker showing where the remote’s main was last time you talked to it.'],
+    ['Push','Upload your local save points to the remote so teammates can see them.'],
+    ['Fetch','Download what’s new on the remote WITHOUT changing your own work — just a peek.'],
+    ['Pull','Fetch AND merge it in — a fast-forward when you’re behind, a real merge when you both changed things.'],
+    ['Upstream','The remote branch your local branch is paired with (e.g. main tracks origin/main).'],
+    ['Non-fast-forward','A push the remote rejects because it has work you don’t — pull first, then push.'],
   ];
   function openGlossary(){ const host=$('#glosList'); host.innerHTML=''; GLOSSARY.forEach(([t,d])=>{ const dt=document.createElement('dt'); dt.textContent=t; const dd=document.createElement('dd'); dd.textContent=d; host.appendChild(dt); host.appendChild(dd); }); $('#glosOverlay').classList.add('show'); }
 
