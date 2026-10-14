@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Turn an image or text into a two-color 3D-printable patch in standard hook-and-loop (morale patch) sizes, exported as 3MF or STL.">
+  <meta name="date" content="2026-10-14">
+  <meta name="tags" content="3d, 3d-printing, stl, 3mf, patch, velcro, image, generator">
+  <title>Hook &amp; Loop Patch Maker</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+      padding: 1rem;
+    }
+    nav { margin-bottom: 1rem; }
+    nav a { color: #58a6ff; text-decoration: none; font-size: 0.875rem; }
+    nav a:hover { text-decoration: underline; }
+
+    details {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+      max-width: 1100px;
+    }
+    summary { cursor: pointer; font-weight: 600; color: #8b949e; font-size: 0.875rem; user-select: none; list-style: none; }
+    summary::before { content: '▶ '; font-size: 0.7em; }
+    details[open] summary::before { content: '▼ '; }
+    .docs { margin-top: 1rem; color: #8b949e; font-size: 0.9rem; line-height: 1.7; }
+    .docs h2 { color: #c9d1d9; font-size: 0.875rem; font-weight: 600; margin: 1rem 0 0.25rem; text-transform: uppercase; letter-spacing: 0.06em; }
+    .docs h2:first-child { margin-top: 0; }
+    .docs p + p { margin-top: 0.5rem; }
+    .docs ul { margin: 0.25rem 0 0 1.25rem; }
+    .docs code { background: #0d1117; border: 1px solid #30363d; border-radius: 3px; padding: 0.1em 0.35em; font-family: monospace; font-size: 0.85em; color: #79c0ff; }
+
+    main { max-width: 1100px; }
+    h1 { font-size: 1.4rem; font-weight: 700; color: #f0f6fc; margin-bottom: 1.25rem; }
+
+    .layout { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 1.25rem; align-items: start; }
+    @media (max-width: 820px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+
+    .panel { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 0.9rem 1rem; margin-bottom: 0.9rem; }
+    .section-title { font-size: 0.75rem; font-weight: 700; color: #8b949e; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.6rem; }
+
+    .row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.55rem; font-size: 0.85rem; }
+    .row:last-child { margin-bottom: 0; }
+    .row > label:first-child { flex: 0 0 105px; color: #c9d1d9; }
+    .row input[type=range] { flex: 1; min-width: 0; accent-color: #58a6ff; }
+    .row .val { flex: 0 0 58px; text-align: right; color: #8b949e; font-variant-numeric: tabular-nums; font-size: 0.8rem; }
+    .row select, .row input[type=number], .row input[type=text], textarea {
+      flex: 1; min-width: 0;
+      background: #0d1117; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px;
+      padding: 0.35rem 0.5rem; font: inherit; font-size: 0.85rem;
+    }
+    .row input[type=number] { width: 0; }
+    .row input[type=color] { width: 44px; height: 28px; border: 1px solid #30363d; border-radius: 6px; background: #0d1117; padding: 2px; }
+    .row .unit { color: #8b949e; font-size: 0.8rem; }
+    .check { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: #c9d1d9; }
+    textarea { width: 100%; resize: vertical; min-height: 3.2rem; margin-bottom: 0.55rem; }
+
+    .tabs { display: flex; gap: 0.35rem; margin-bottom: 0.7rem; }
+    .tabs button { flex: 1; }
+
+    button {
+      background: #21262d; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px;
+      padding: 0.45rem 0.75rem; font: inherit; font-size: 0.85rem; cursor: pointer;
+    }
+    button:hover { border-color: #58a6ff; }
+    button.active { background: #1f6feb33; border-color: #58a6ff; color: #79c0ff; }
+    button.primary { background: #238636; border-color: #2ea043; color: #fff; font-weight: 600; }
+    button.primary:hover { background: #2ea043; }
+
+    .drop {
+      border: 1.5px dashed #30363d; border-radius: 8px; padding: 0.9rem; text-align: center;
+      color: #8b949e; font-size: 0.82rem; cursor: pointer; margin-bottom: 0.7rem; line-height: 1.5;
+    }
+    .drop.over, .drop:hover { border-color: #58a6ff; color: #c9d1d9; }
+    .drop strong { color: #58a6ff; }
+
+    .preview-wrap { position: sticky; top: 1rem; }
+    #preview { width: 100%; display: block; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; }
+    .stats { font-size: 0.82rem; color: #8b949e; margin-top: 0.6rem; line-height: 1.7; }
+    .stats b { color: #c9d1d9; font-weight: 600; }
+    .exports { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.8rem; }
+    .status { font-size: 0.8rem; color: #3fb950; margin-top: 0.6rem; min-height: 1.2em; }
+    .status.err { color: #f85149; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <nav><a href="../index.html">← Back to experiments</a></nav>
+
+  <details>
+    <summary>How this works</summary>
+    <div class="docs">
+      <h2>About</h2>
+      <p>Generates a two-color, 3D-printable patch in the common hook-and-loop (Velcro / "morale patch") sizes from any image or a line of text. The patch is a flat base plate in one color with the artwork raised on top in a second color, so it prints without supports and gives a crisp two-tone look with a single color change.</p>
+
+      <h2>How to use</h2>
+      <ul>
+        <li>Pick a <strong>size preset</strong> (3″×2″ morale patch, 3.5″×2″ flag, rounds, name tapes, shield…) or type custom dimensions.</li>
+        <li>Drop, choose, or paste (<code>Ctrl/⌘+V</code>) an image — or switch to <strong>Text</strong> for name tapes and callsigns.</li>
+        <li>Choose what gets raised: dark areas, light areas, or everything non-transparent (best for logos with transparent backgrounds). Tune the threshold, smoothing and speck removal until the preview looks clean.</li>
+        <li>Optionally add a raised <strong>border</strong>, then export.</li>
+        <li><strong>3MF (2 parts)</strong> loads into Bambu Studio / OrcaSlicer / PrusaSlicer as one object with two parts — assign a filament to each. Or export the STLs separately.</li>
+        <li>Single-extruder printers: export the combined STL and add a filament change (M600 / pause) at the Z height shown under the preview.</li>
+      </ul>
+      <p>Attaching: stick or glue adhesive-backed <em>hook</em> tape to the flat back (the loop side lives on bags, caps and plate carriers). A textured PEI plate gives the front-facing base a nice finish if you flip the model face-down — but then the color change goes at the base thickness from the bottom, which is what the default orientation already gives you.</p>
+
+      <h2>Technical details</h2>
+      <p>The patch outline is built as a polygon (rounded rectangle, ellipse, shield or hexagon) and the base is a straight extrusion of it, triangulated as a fan since every shape is convex. The artwork is rasterised onto a grid at the chosen resolution with a canvas (<code>ctx.filter = blur()</code> for smoothing), thresholded, clipped using a signed-distance field of the outline, and cleaned with a connected-component pass that removes small islands and fills small holes.</p>
+      <p>The raised layer is meshed directly from the grid: top/bottom faces are merged into per-row runs and side walls are emitted only where an "on" cell meets an "off" one, merged along straight runs. Exports are written in-browser: binary STL via <code>DataView</code>, and 3MF as a hand-built uncompressed ZIP (with CRC-32) containing a model with two mesh objects joined as components. No libraries, nothing uploaded.</p>
+    </div>
+  </details>
+
+  <main>
+    <h1>Hook &amp; Loop Patch Maker</h1>
+
+    <div class="layout">
+      <div class="controls">
+        <div class="panel">
+          <div class="section-title">Size &amp; shape</div>
+          <div class="row"><label for="preset">Preset</label><select id="preset"></select></div>
+          <div class="row"><label for="shape">Shape</label>
+            <select id="shape">
+              <option value="rect">Rounded rectangle</option>
+              <option value="ellipse">Round / oval</option>
+              <option value="shield">Shield</option>
+              <option value="hex">Hexagon</option>
+            </select>
+          </div>
+          <div class="row"><label for="width">Width</label><input type="number" id="width" min="10" max="250" step="0.1"><span class="unit" id="widthIn"></span></div>
+          <div class="row"><label for="height">Height</label><input type="number" id="height" min="10" max="250" step="0.1"><span class="unit" id="heightIn"></span></div>
+          <div class="row" id="radiusRow"><label for="radius">Corner radius</label><input type="range" id="radius" min="0" max="25" step="0.5"><span class="val" id="radiusVal"></span></div>
+        </div>
+
+        <div class="panel">
+          <div class="section-title">Artwork</div>
+          <div class="tabs">
+            <button id="tabImage" class="active" type="button">Image</button>
+            <button id="tabText" type="button">Text</button>
+          </div>
+          <div id="imageControls">
+            <div class="drop" id="drop"><strong>Choose an image</strong> or drop / paste one here<br><span id="fileName">Using built-in demo artwork</span></div>
+            <input type="file" id="file" accept="image/*" class="hidden">
+          </div>
+          <div id="textControls" class="hidden">
+            <textarea id="text" spellcheck="false">CALLSIGN</textarea>
+            <div class="row"><label for="font">Font</label>
+              <select id="font">
+                <option value="900 200px 'Arial Black', 'Helvetica Neue', Arial, sans-serif">Heavy sans</option>
+                <option value="700 200px Impact, 'Arial Narrow', sans-serif">Condensed</option>
+                <option value="700 200px Georgia, 'Times New Roman', serif">Serif</option>
+                <option value="700 200px 'Courier New', monospace">Mono</option>
+                <option value="700 200px system-ui, sans-serif">System</option>
+              </select>
+            </div>
+          </div>
+          <div class="row"><label for="mode">Raise</label>
+            <select id="mode">
+              <option value="dark">Dark areas</option>
+              <option value="light">Light areas</option>
+              <option value="alpha">Non-transparent areas</option>
+            </select>
+          </div>
+          <div class="row" id="thresholdRow"><label for="threshold">Threshold</label><input type="range" id="threshold" min="1" max="254" value="128"><span class="val" id="thresholdVal"></span></div>
+          <div class="row"><label for="blur">Smoothing</label><input type="range" id="blur" min="0" max="1.5" step="0.05" value="0.2"><span class="val" id="blurVal"></span></div>
+          <div class="row"><label for="speck">Remove specks</label><input type="range" id="speck" min="0" max="4" step="0.1" value="0.5"><span class="val" id="speckVal"></span></div>
+          <div class="row"><label for="fit">Fit</label>
+            <select id="fit">
+              <option value="contain">Contain</option>
+              <option value="cover">Cover (crop)</option>
+              <option value="stretch">Stretch</option>
+            </select>
+          </div>
+          <div class="row"><label for="scale">Scale</label><input type="range" id="scale" min="20" max="200" value="100"><span class="val" id="scaleVal"></span></div>
+          <div class="row"><label for="offX">Offset X</label><input type="range" id="offX" min="-50" max="50" value="0"><span class="val" id="offXVal"></span></div>
+          <div class="row"><label for="offY">Offset Y</label><input type="range" id="offY" min="-50" max="50" value="0"><span class="val" id="offYVal"></span></div>
+          <div class="row"><label for="margin">Art margin</label><input type="range" id="margin" min="0" max="10" step="0.25" value="2"><span class="val" id="marginVal"></span></div>
+        </div>
+
+        <div class="panel">
+          <div class="section-title">Border &amp; thickness</div>
+          <div class="row"><label for="rim">Border width</label><input type="range" id="rim" min="0" max="6" step="0.1" value="1.6"><span class="val" id="rimVal"></span></div>
+          <div class="row"><label for="baseT">Base</label><input type="range" id="baseT" min="0.6" max="4" step="0.1" value="1.6"><span class="val" id="baseTVal"></span></div>
+          <div class="row"><label for="relief">Raised art</label><input type="range" id="relief" min="0.2" max="3" step="0.1" value="0.8"><span class="val" id="reliefVal"></span></div>
+          <div class="row"><label for="res">Resolution</label>
+            <select id="res">
+              <option value="0.1">0.10 mm (fine, big files)</option>
+              <option value="0.15">0.15 mm</option>
+              <option value="0.2" selected>0.20 mm</option>
+              <option value="0.25">0.25 mm</option>
+              <option value="0.3">0.30 mm</option>
+              <option value="0.4">0.40 mm (fast)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="section-title">Colors (preview + 3MF)</div>
+          <div class="row"><label for="baseColor">Base</label><input type="color" id="baseColor" value="#4b5320"><label for="artColor" style="margin-left:1rem;color:#c9d1d9">Raised</label><input type="color" id="artColor" value="#d8cfb0"></div>
+          <div class="row">
+            <button type="button" data-colors="#4b5320,#d8cfb0">OD / Tan</button>
+            <button type="button" data-colors="#1c1c1c,#9a9a9a">Black / Gray</button>
+            <button type="button" data-colors="#c2b280,#3b3b2f">Coyote</button>
+            <button type="button" data-colors="#1a1a1a,#f2f2f2">B / W</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="preview-wrap">
+        <canvas id="preview"></canvas>
+        <div class="stats" id="stats"></div>
+        <div class="row" style="margin-top:0.8rem"><label for="fname" style="flex:0 0 auto">File name</label><input type="text" id="fname" value="patch"></div>
+        <div class="exports">
+          <button class="primary" type="button" id="ex3mf">Download 3MF (2 parts)</button>
+          <button type="button" id="exStl">STL (combined)</button>
+          <button type="button" id="exBase">STL (base only)</button>
+          <button type="button" id="exArt">STL (raised only)</button>
+        </div>
+        <div class="status" id="status"></div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    'use strict';
+    const IN = 25.4;
+    const $ = id => document.getElementById(id);
+
+    // ---------- Presets ----------
+    const PRESETS = [
+      { label: 'Morale patch 3″ × 2″',        shape: 'rect',    w: 3,    h: 2,    r: 5 },
+      { label: 'Flag patch 3.5″ × 2″',        shape: 'rect',    w: 3.5,  h: 2,    r: 4 },
+      { label: 'Wide patch 4″ × 2″',          shape: 'rect',    w: 4,    h: 2,    r: 5 },
+      { label: 'Square 2″ × 2″',              shape: 'rect',    w: 2,    h: 2,    r: 5 },
+      { label: 'Square 3″ × 3″',              shape: 'rect',    w: 3,    h: 3,    r: 7 },
+      { label: 'Round 2″',                    shape: 'ellipse', w: 2,    h: 2,    r: 0 },
+      { label: 'Round 3″',                    shape: 'ellipse', w: 3,    h: 3,    r: 0 },
+      { label: 'Round 3.5″',                  shape: 'ellipse', w: 3.5,  h: 3.5,  r: 0 },
+      { label: 'Oval 3.5″ × 2.5″',            shape: 'ellipse', w: 3.5,  h: 2.5,  r: 0 },
+      { label: 'Shield 3″ × 3.5″',            shape: 'shield',  w: 3,    h: 3.5,  r: 0 },
+      { label: 'Hexagon 3″',                  shape: 'hex',     w: 3,    h: 2.6,  r: 0 },
+      { label: 'Name tape 1″ × 4″',           shape: 'rect',    w: 4,    h: 1,    r: 3 },
+      { label: 'Name tape 1″ × 5″',           shape: 'rect',    w: 5,    h: 1,    r: 3 },
+      { label: 'Blood type / ID 1″ × 2″',     shape: 'rect',    w: 2,    h: 1,    r: 3 },
+    ];
+    const presetSel = $('preset');
+    PRESETS.forEach((p, i) => presetSel.add(new Option(p.label, i)));
+    presetSel.add(new Option('Custom', 'custom'));
+
+    function applyPreset(i) {
+      const p = PRESETS[i];
+      $('shape').value = p.shape;
+      $('width').value = +(p.w * IN).toFixed(1);
+      $('height').value = +(p.h * IN).toFixed(1);
+      $('radius').value = p.r;
+      if (p.label.startsWith('Name tape') || p.label.startsWith('Blood')) setSource('text');
+    }
+
+    // ---------- Settings ----------
+    const RANGES = {
+      radius: v => v + ' mm', threshold: v => v, blur: v => (+v).toFixed(2) + ' mm',
+      speck: v => (+v).toFixed(1) + ' mm²', scale: v => v + '%', offX: v => v + '%', offY: v => v + '%',
+      margin: v => v + ' mm', rim: v => (+v ? (+v).toFixed(1) + ' mm' : 'off'),
+      baseT: v => (+v).toFixed(1) + ' mm', relief: v => (+v).toFixed(1) + ' mm',
+    };
+
+    function readSettings() {
+      const num = id => parseFloat($(id).value);
+      const W = Math.min(250, Math.max(10, num('width') || 76.2));
+      const H = Math.min(250, Math.max(10, num('height') || 50.8));
+      return {
+        shape: $('shape').value, W, H, r: num('radius'),
+        mode: $('mode').value, threshold: num('threshold'), blur: num('blur'), speck: num('speck'),
+        fit: $('fit').value, scale: num('scale') / 100, offX: num('offX') / 100, offY: num('offY') / 100,
+        margin: num('margin'), rim: num('rim'), baseT: num('baseT'), relief: num('relief'), res: num('res'),
+        baseColor: $('baseColor').value, artColor: $('artColor').value,
+      };
+    }
+
+    // ---------- Outline geometry (model coords: mm, origin at centre, y up, CCW) ----------
+    function outline(s) {
+      const hx = s.W / 2, hy = s.H / 2, pts = [];
+      if (s.shape === 'rect') {
+        const r = Math.min(Math.max(0, s.r), hx - 0.01, hy - 0.01);
+        if (r < 0.05) return [[hx, -hy], [hx, hy], [-hx, hy], [-hx, -hy]];
+        const corners = [[hx - r, -hy + r, -90], [hx - r, hy - r, 0], [-hx + r, hy - r, 90], [-hx + r, -hy + r, 180]];
+        const seg = 16;
+        for (const [cx, cy, a0] of corners)
+          for (let k = 0; k <= seg; k++) {
+            const a = (a0 + 90 * k / seg) * Math.PI / 180;
+            pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
+          }
+      } else if (s.shape === 'ellipse') {
+        const n = 192;
+        for (let k = 0; k < n; k++) { const a = 2 * Math.PI * k / n; pts.push([hx * Math.cos(a), hy * Math.sin(a)]); }
+      } else if (s.shape === 'shield') {
+        const quad = (p0, c, p1, n, skipFirst) => {
+          for (let k = skipFirst ? 1 : 0; k <= n; k++) {
+            const t = k / n, u = 1 - t;
+            pts.push([u * u * p0[0] + 2 * u * t * c[0] + t * t * p1[0], u * u * p0[1] + 2 * u * t * c[1] + t * t * p1[1]]);
+          }
+        };
+        pts.push([1, 1], [-1, 1]);
+        quad([-1, -0.12], [-1, -0.62], [0, -1], 32, false);
+        quad([0, -1], [1, -0.62], [1, -0.12], 32, true);
+        return pts.map(([x, y]) => [x * hx, y * hy]);
+      } else { // hex, points left/right
+        return [[hx, 0], [hx / 2, hy], [-hx / 2, hy], [-hx, 0], [-hx / 2, -hy], [hx / 2, -hy]];
+      }
+      return pts;
+    }
+
+    // Exact signed distance to a polygon (negative inside).
+    function polySdf(poly, px, py) {
+      let d = Infinity, inside = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const [xi, yi] = poly[i], [xj, yj] = poly[j];
+        const ex = xj - xi, ey = yj - yi, wx = px - xi, wy = py - yi;
+        const t = Math.max(0, Math.min(1, (wx * ex + wy * ey) / (ex * ex + ey * ey)));
+        const bx = wx - ex * t, by = wy - ey * t;
+        d = Math.min(d, bx * bx + by * by);
+        if ((yi > py) !== (yj > py) && px < xi + (py - yi) * ex / ey) inside = !inside;
+      }
+      return (inside ? -1 : 1) * Math.sqrt(d);
+    }
+
+    // ---------- Grid ----------
+    let sdfCache = { key: '', sdf: null };
+    function gridFor(s) {
+      const nx = Math.max(4, Math.round(s.W / s.res)), ny = Math.max(4, Math.round(s.H / s.res));
+      const cx = s.W / nx, cy = s.H / ny;
+      const poly = outline(s);
+      const key = [s.shape, s.W, s.H, s.r, s.res].join('|');
+      if (sdfCache.key !== key) {
+        const sdf = new Float32Array(nx * ny);
+        for (let j = 0; j < ny; j++) {
+          const y = s.H / 2 - (j + 0.5) * cy;
+          for (let i = 0; i < nx; i++) sdf[j * nx + i] = polySdf(poly, -s.W / 2 + (i + 0.5) * cx, y);
+        }
+        sdfCache = { key, sdf };
+      }
+      return { nx, ny, cx, cy, poly, sdf: sdfCache.sdf };
+    }
+
+    // ---------- Artwork sources ----------
+    let sourceMode = 'image';
+    let imageSource = makeDemoArt();
+
+    function makeDemoArt() {
+      const c = document.createElement('canvas');
+      c.width = 600; c.height = 400;
+      const g = c.getContext('2d');
+      g.fillStyle = '#000';
+      g.beginPath(); g.arc(400, 120, 55, 0, Math.PI * 2); g.fill();
+      g.beginPath();
+      g.moveTo(20, 330); g.lineTo(190, 90); g.lineTo(270, 200); g.lineTo(330, 140); g.lineTo(520, 330); g.closePath(); g.fill();
+      g.globalCompositeOperation = 'destination-out';
+      g.beginPath(); g.moveTo(190, 90); g.lineTo(150, 146); g.lineTo(175, 135); g.lineTo(195, 155); g.lineTo(215, 130); g.lineTo(232, 146); g.closePath(); g.fill();
+      g.globalCompositeOperation = 'source-over';
+      g.font = '900 70px "Arial Black", Arial, sans-serif'; g.textAlign = 'center';
+      g.fillText('SEND IT', 300, 395);
+      return c;
+    }
+
+    function makeTextArt() {
+      const lines = $('text').value.split('\n').map(l => l.trimEnd()).filter((l, i, a) => l || a.length === 1);
+      if (!lines.length || !lines.join('').trim()) return null;
+      const font = $('font').value;
+      const c = document.createElement('canvas'), g = c.getContext('2d');
+      g.font = font;
+      const lh = 200 * 1.05;
+      const widths = lines.map(l => g.measureText(l));
+      const w = Math.max(...widths.map(m => m.actualBoundingBoxLeft + m.actualBoundingBoxRight)) + 20;
+      const asc = Math.max(...widths.map(m => m.actualBoundingBoxAscent));
+      const desc = Math.max(...widths.map(m => m.actualBoundingBoxDescent));
+      c.width = Math.ceil(w); c.height = Math.ceil(asc + desc + lh * (lines.length - 1) + 20);
+      g.font = font; g.fillStyle = '#000'; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+      lines.forEach((l, i) => g.fillText(l, c.width / 2, 10 + asc + i * lh));
+      return c;
+    }
+
+    const currentSource = () => sourceMode === 'text' ? makeTextArt() : imageSource;
+
+    // ---------- Rasterise + clean ----------
+    const sampleCanvas = document.createElement('canvas');
+    const sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
+
+    function rasterise(s, G) {
+      const { nx, ny, cx, cy, sdf } = G;
+      const design = new Uint8Array(nx * ny);
+      const inBase = -0.71 * Math.max(cx, cy);         // cell fully inside the outline
+      const artEdge = inBase - s.rim - s.margin;       // art stays inside the border + gap
+
+      const src = currentSource();
+      if (src) {
+        sampleCanvas.width = nx; sampleCanvas.height = ny;
+        const g = sampleCtx;
+        g.clearRect(0, 0, nx, ny);
+        const inset = s.rim + s.margin;
+        const bw = Math.max(1, (s.W - 2 * inset) / cx), bh = Math.max(1, (s.H - 2 * inset) / cy);
+        const iw = src.width, ih = src.height;
+        let dw, dh;
+        if (s.fit === 'stretch') { dw = bw; dh = bh; }
+        else {
+          // image pixels are square; cells may be very slightly non-square, so fit in mm space
+          const k = (s.fit === 'contain' ? Math.min : Math.max)(bw * cx / iw, bh * cy / ih);
+          dw = iw * k / cx; dh = ih * k / cy;
+        }
+        dw *= s.scale; dh *= s.scale;
+        const dx = nx / 2 - dw / 2 + s.offX * bw, dy = ny / 2 - dh / 2 - s.offY * bh;
+        g.filter = s.blur > 0 ? `blur(${(s.blur / cx).toFixed(2)}px)` : 'none';
+        g.imageSmoothingQuality = 'high';
+        g.drawImage(src, dx, dy, dw, dh);
+        g.filter = 'none';
+        const px = g.getImageData(0, 0, nx, ny).data;
+        const t = s.threshold;
+        for (let n = 0, p = 0; n < nx * ny; n++, p += 4) {
+          if (sdf[n] > artEdge) continue;
+          const a = px[p + 3];
+          if (a < 128) continue;
+          if (s.mode === 'alpha') { design[n] = 1; continue; }
+          // un-premultiply isn't needed: getImageData returns straight alpha
+          const lum = 0.299 * px[p] + 0.587 * px[p + 1] + 0.114 * px[p + 2];
+          if (s.mode === 'dark' ? lum < t : lum >= t) design[n] = 1;
+        }
+        if (s.speck > 0) {
+          const minCells = s.speck / (cx * cy);
+          despeckle(design, nx, ny, 1, minCells);
+          despeckle(design, nx, ny, 0, minCells);
+          for (let n = 0; n < nx * ny; n++) if (sdf[n] > artEdge) design[n] = 0;
+        }
+      }
+      if (s.rim > 0) {
+        for (let n = 0; n < nx * ny; n++) {
+          const d = sdf[n];
+          if (d <= inBase && d > inBase - s.rim) design[n] = 1;
+        }
+      }
+      fixDiagonals(design, nx, ny, sdf, inBase);
+      return design;
+    }
+
+    // Cells touching only at a corner make a non-manifold edge; bridge them with an extra cell.
+    function fixDiagonals(grid, nx, ny, sdf, inBase) {
+      for (let pass = 0, changed = true; changed && pass < 8; pass++) {
+        changed = false;
+        for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) {
+          const a = j * nx + i, b = a + 1, c = a + nx, d = c + 1;
+          let fill;
+          if (grid[a] && grid[d] && !grid[b] && !grid[c]) fill = [b, c, a];
+          else if (grid[b] && grid[c] && !grid[a] && !grid[d]) fill = [a, d, b];
+          else continue;
+          if (sdf[fill[0]] <= inBase) grid[fill[0]] = 1;
+          else if (sdf[fill[1]] <= inBase) grid[fill[1]] = 1;
+          else grid[fill[2]] = 0;
+          changed = true;
+        }
+      }
+    }
+
+    // Flip 4-connected components of `value` smaller than minCells.
+    function despeckle(grid, nx, ny, value, minCells) {
+      const seen = new Uint8Array(nx * ny), stack = new Int32Array(nx * ny), comp = new Int32Array(nx * ny);
+      for (let start = 0; start < nx * ny; start++) {
+        if (seen[start] || grid[start] !== value) continue;
+        let sp = 0, cn = 0;
+        stack[sp++] = start; seen[start] = 1;
+        while (sp) {
+          const n = stack[--sp]; comp[cn++] = n;
+          const i = n % nx, j = (n - i) / nx;
+          if (i > 0      && !seen[n - 1]  && grid[n - 1]  === value) { seen[n - 1] = 1;  stack[sp++] = n - 1; }
+          if (i < nx - 1 && !seen[n + 1]  && grid[n + 1]  === value) { seen[n + 1] = 1;  stack[sp++] = n + 1; }
+          if (j > 0      && !seen[n - nx] && grid[n - nx] === value) { seen[n - nx] = 1; stack[sp++] = n - nx; }
+          if (j < ny - 1 && !seen[n + nx] && grid[n + nx] === value) { seen[n + nx] = 1; stack[sp++] = n + nx; }
+        }
+        if (cn < minCells) for (let k = 0; k < cn; k++) grid[comp[k]] = 1 - value;
+      }
+    }
+
+    // ---------- Meshing (flat triangle soup: 9 floats per triangle) ----------
+    class Soup {
+      constructor() { this.a = []; }
+      tri(p, q, r) { this.a.push(p[0], p[1], p[2], q[0], q[1], q[2], r[0], r[1], r[2]); }
+      quad(p, q, r, t) { this.tri(p, q, r); this.tri(p, r, t); }
+      get count() { return this.a.length / 9; }
+    }
+
+    function baseMesh(poly, z0, z1) {
+      const m = new Soup();
+      let mx = 0, my = 0;
+      for (const [x, y] of poly) { mx += x; my += y; }
+      mx /= poly.length; my /= poly.length;
+      for (let i = 0; i < poly.length; i++) {
+        const [ax, ay] = poly[i], [bx, by] = poly[(i + 1) % poly.length];
+        m.tri([mx, my, z1], [ax, ay, z1], [bx, by, z1]);
+        m.tri([mx, my, z0], [bx, by, z0], [ax, ay, z0]);
+        m.quad([ax, ay, z0], [bx, by, z0], [bx, by, z1], [ax, ay, z1]);
+      }
+      return m;
+    }
+
+    function designMesh(design, s, G, z0, z1) {
+      const { nx, ny, cx, cy } = G, m = new Soup();
+      const X = i => -s.W / 2 + i * cx, Y = j => s.H / 2 - j * cy;
+      const on = (i, j) => i >= 0 && j >= 0 && i < nx && j < ny && design[j * nx + i] === 1;
+
+      // Top + bottom faces as horizontal runs. To stay watertight (no T-junctions) each
+      // run's long edges get a vertex wherever the neighbouring row changes state, and
+      // the run is triangulated as a zipper between its lower and upper vertex chains.
+      for (let j = 0; j < ny; j++) {
+        let i = 0;
+        while (i < nx) {
+          if (!on(i, j)) { i++; continue; }
+          const i0 = i;
+          while (i < nx && on(i, j)) i++;
+          const lo = [i0], up = [i0];
+          for (let k = i0 + 1; k < i; k++) {
+            if (on(k, j + 1) !== on(k - 1, j + 1)) lo.push(k);
+            if (on(k, j - 1) !== on(k - 1, j - 1)) up.push(k);
+          }
+          lo.push(i); up.push(i);
+          const yt = Y(j), yb = Y(j + 1);
+          let a = 0, b = 0;
+          while (a < lo.length - 1 || b < up.length - 1) {
+            if (b === up.length - 1 || (a < lo.length - 1 && lo[a + 1] <= up[b + 1])) {
+              const p = [X(lo[a]), yb], q = [X(lo[a + 1]), yb], r = [X(up[b]), yt];
+              m.tri([...p, z1], [...q, z1], [...r, z1]);
+              m.tri([...p, z0], [...r, z0], [...q, z0]);
+              a++;
+            } else {
+              const p = [X(lo[a]), yb], q = [X(up[b + 1]), yt], r = [X(up[b]), yt];
+              m.tri([...p, z1], [...q, z1], [...r, z1]);
+              m.tri([...p, z0], [...r, z0], [...q, z0]);
+              b++;
+            }
+          }
+        }
+      }
+      // walls on vertical grid lines x = X(i), one per cell so they meet the row runs exactly
+      for (let i = 0; i <= nx; i++) {
+        for (let j = 0; j < ny; j++) {
+          const st = (on(i - 1, j) ? 1 : 0) - (on(i, j) ? 1 : 0); // +1: solid on left, faces +x
+          if (!st) continue;
+          const x = X(i), yt = Y(j), yb = Y(j + 1);
+          if (st > 0) m.quad([x, yb, z0], [x, yt, z0], [x, yt, z1], [x, yb, z1]);
+          else        m.quad([x, yt, z0], [x, yb, z0], [x, yb, z1], [x, yt, z1]);
+        }
+      }
+      // walls on horizontal grid lines y = Y(j), merged along x
+      for (let j = 0; j <= ny; j++) {
+        let i = 0;
+        while (i < nx) {
+          const st = (on(i, j) ? 1 : 0) - (on(i, j - 1) ? 1 : 0); // +1: solid below (row j), faces +y
+          if (!st) { i++; continue; }
+          const i0 = i;
+          while (i < nx && (on(i, j) ? 1 : 0) - (on(i, j - 1) ? 1 : 0) === st) i++;
+          const y = Y(j), x0 = X(i0), x1 = X(i);
+          if (st > 0) m.quad([x1, y, z0], [x0, y, z0], [x0, y, z1], [x1, y, z1]);
+          else        m.quad([x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1]);
+        }
+      }
+      return m;
+    }
+
+    // ---------- Writers ----------
+    function stlBlob(meshes) {
+      const total = meshes.reduce((n, m) => n + m.count, 0);
+      const buf = new ArrayBuffer(84 + total * 50), dv = new DataView(buf);
+      const head = 'Hook & Loop Patch Maker';
+      for (let i = 0; i < head.length; i++) dv.setUint8(i, head.charCodeAt(i));
+      dv.setUint32(80, total, true);
+      let o = 84;
+      for (const m of meshes) {
+        const a = m.a;
+        for (let t = 0; t < a.length; t += 9) {
+          const ux = a[t + 3] - a[t], uy = a[t + 4] - a[t + 1], uz = a[t + 5] - a[t + 2];
+          const vx = a[t + 6] - a[t], vy = a[t + 7] - a[t + 1], vz = a[t + 8] - a[t + 2];
+          let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+          const l = Math.hypot(nx, ny, nz) || 1;
+          dv.setFloat32(o, nx / l, true); dv.setFloat32(o + 4, ny / l, true); dv.setFloat32(o + 8, nz / l, true);
+          for (let k = 0; k < 9; k++) dv.setFloat32(o + 12 + k * 4, a[t + k], true);
+          o += 50;
+        }
+      }
+      return new Blob([buf], { type: 'model/stl' });
+    }
+
+    function meshXml(m) {
+      const map = new Map(), verts = [], tris = [];
+      const a = m.a;
+      const idx = k => {
+        const x = a[k], y = a[k + 1], z = a[k + 2];
+        const key = Math.round(x * 1e4) + ',' + Math.round(y * 1e4) + ',' + Math.round(z * 1e4);
+        let v = map.get(key);
+        if (v === undefined) {
+          v = verts.length; map.set(key, v);
+          verts.push(`<vertex x="${+x.toFixed(4)}" y="${+y.toFixed(4)}" z="${+z.toFixed(4)}"/>`);
+        }
+        return v;
+      };
+      for (let t = 0; t < a.length; t += 9) {
+        const v1 = idx(t), v2 = idx(t + 3), v3 = idx(t + 6);
+        if (v1 !== v2 && v2 !== v3 && v1 !== v3) tris.push(`<triangle v1="${v1}" v2="${v2}" v3="${v3}"/>`);
+      }
+      return `<mesh><vertices>${verts.join('')}</vertices><triangles>${tris.join('')}</triangles></mesh>`;
+    }
+
+    function threeMfBlob(base, art, s) {
+      const model =
+`<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+<metadata name="Application">Hook &amp; Loop Patch Maker</metadata>
+<resources>
+<basematerials id="1"><base name="Base" displaycolor="${s.baseColor.toUpperCase()}FF"/><base name="Raised" displaycolor="${s.artColor.toUpperCase()}FF"/></basematerials>
+<object id="2" name="Base" type="model" pid="1" pindex="0">${meshXml(base)}</object>
+<object id="3" name="Raised" type="model" pid="1" pindex="1">${meshXml(art)}</object>
+<object id="4" name="Patch" type="model"><components><component objectid="2"/><component objectid="3"/></components></object>
+</resources>
+<build><item objectid="4"/></build>
+</model>`;
+      const files = [
+        ['[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>`],
+        ['_rels/.rels', `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>`],
+        ['3D/3dmodel.model', model],
+      ];
+      return new Blob([zipStore(files)], { type: 'model/3mf' });
+    }
+
+    const CRC_TABLE = (() => {
+      const t = new Uint32Array(256);
+      for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+      return t;
+    })();
+    function crc32(bytes) {
+      let c = 0xFFFFFFFF;
+      for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+      return (c ^ 0xFFFFFFFF) >>> 0;
+    }
+
+    // Minimal uncompressed ("stored") ZIP writer.
+    function zipStore(files) {
+      const enc = new TextEncoder(), parts = [], central = [];
+      let offset = 0;
+      for (const [name, text] of files) {
+        const nameB = enc.encode(name), data = enc.encode(text), crc = crc32(data);
+        const lh = new DataView(new ArrayBuffer(30));
+        lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0, true); lh.setUint16(8, 0, true);
+        lh.setUint16(10, 0, true); lh.setUint16(12, 0x21, true); lh.setUint32(14, crc, true);
+        lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true);
+        lh.setUint16(26, nameB.length, true); lh.setUint16(28, 0, true);
+        parts.push(lh.buffer, nameB, data);
+        const ch = new DataView(new ArrayBuffer(46));
+        ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0, true);
+        ch.setUint16(10, 0, true); ch.setUint16(12, 0, true); ch.setUint16(14, 0x21, true); ch.setUint32(16, crc, true);
+        ch.setUint32(20, data.length, true); ch.setUint32(24, data.length, true); ch.setUint16(28, nameB.length, true);
+        ch.setUint32(42, offset, true);
+        central.push(ch.buffer, nameB);
+        offset += 30 + nameB.length + data.length;
+      }
+      const cdSize = central.reduce((n, b) => n + b.byteLength, 0);
+      const end = new DataView(new ArrayBuffer(22));
+      end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+      end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
+      return new Blob([...parts, ...central, end.buffer]);
+    }
+
+    // ---------- Preview ----------
+    const preview = $('preview'), pctx = preview.getContext('2d');
+    const cellCanvas = document.createElement('canvas'), cellCtx = cellCanvas.getContext('2d');
+    let state = null;
+
+    function hexRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+
+    function drawPreview(s, G, design) {
+      const dpr = window.devicePixelRatio || 1;
+      const cssW = preview.clientWidth || 600;
+      const pad = 28;
+      const k = Math.min((cssW - 2 * pad) / s.W, 520 / s.H);
+      const cssH = Math.round(s.H * k + 2 * pad);
+      preview.style.height = cssH + 'px';
+      preview.width = Math.round(cssW * dpr); preview.height = Math.round(cssH * dpr);
+      const g = pctx;
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.clearRect(0, 0, cssW, cssH);
+
+      const ox = cssW / 2, oy = cssH / 2;
+      // 10 mm grid
+      g.strokeStyle = '#161b22'; g.lineWidth = 1;
+      for (let x = ox % (10 * k); x < cssW; x += 10 * k) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, cssH); g.stroke(); }
+      for (let y = oy % (10 * k); y < cssH; y += 10 * k) { g.beginPath(); g.moveTo(0, y); g.lineTo(cssW, y); g.stroke(); }
+
+      const path = new Path2D();
+      G.poly.forEach(([x, y], i) => (i ? path.lineTo : path.moveTo).call(path, ox + x * k, oy - y * k));
+      path.closePath();
+      g.save();
+      g.shadowColor = 'rgba(0,0,0,0.6)'; g.shadowBlur = 14; g.shadowOffsetY = 4;
+      g.fillStyle = s.baseColor; g.fill(path);
+      g.restore();
+
+      // raised layer, with a darker copy offset for a hint of depth
+      const { nx, ny } = G;
+      cellCanvas.width = nx; cellCanvas.height = ny;
+      const img = cellCtx.createImageData(nx, ny);
+      const draw = (rgb, dx, dy) => {
+        for (let n = 0, p = 0; n < nx * ny; n++, p += 4) {
+          img.data[p] = rgb[0]; img.data[p + 1] = rgb[1]; img.data[p + 2] = rgb[2]; img.data[p + 3] = design[n] ? 255 : 0;
+        }
+        cellCtx.putImageData(img, 0, 0);
+        g.imageSmoothingEnabled = k * G.cx < 2.5;
+        g.drawImage(cellCanvas, ox - s.W / 2 * k + dx, oy - s.H / 2 * k + dy, s.W * k, s.H * k);
+      };
+      const art = hexRgb(s.artColor);
+      const depth = Math.max(1, Math.min(3, s.relief * k * 0.12));
+      draw(art.map(v => v * 0.45), depth, depth);
+      draw(art, 0, 0);
+
+      g.strokeStyle = 'rgba(255,255,255,0.15)'; g.lineWidth = 1; g.stroke(path);
+
+      // dimension labels
+      g.fillStyle = '#8b949e'; g.font = '12px system-ui, sans-serif'; g.textAlign = 'center';
+      g.fillText(`${s.W.toFixed(1)} mm (${(s.W / IN).toFixed(2)}″)`, ox, oy + s.H / 2 * k + 19);
+      g.save(); g.translate(ox - s.W / 2 * k - 12, oy); g.rotate(-Math.PI / 2);
+      g.fillText(`${s.H.toFixed(1)} mm (${(s.H / IN).toFixed(2)}″)`, 0, 0); g.restore();
+    }
+
+    function updateStats(s, G, design) {
+      let on = 0, inside = 0;
+      const inBase = -0.71 * Math.max(G.cx, G.cy);
+      for (let n = 0; n < design.length; n++) { if (G.sdf[n] <= inBase) inside++; if (design[n]) on++; }
+      const pct = inside ? Math.round(100 * on / inside) : 0;
+      $('stats').innerHTML =
+        `<b>${s.W.toFixed(1)} × ${s.H.toFixed(1)} mm</b> (${(s.W / IN).toFixed(2)}″ × ${(s.H / IN).toFixed(2)}″) · ` +
+        `total height <b>${(s.baseT + s.relief).toFixed(1)} mm</b> · raised coverage ${pct}%<br>` +
+        `Single-extruder: color change / pause at <b>Z = ${s.baseT.toFixed(2)} mm</b> (first layer of the raised art).<br>` +
+        `Grid ${G.nx} × ${G.ny} cells at ${G.cx.toFixed(3)} mm` + (pct === 0 ? ' · <span style="color:#d29922">nothing raised — check threshold / mode</span>' : '');
+    }
+
+    let pending = false;
+    function render() {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(() => {
+        pending = false;
+        for (const id in RANGES) $(id + 'Val').textContent = RANGES[id]($(id).value);
+        const s = readSettings();
+        $('widthIn').textContent = (s.W / IN).toFixed(2) + '″';
+        $('heightIn').textContent = (s.H / IN).toFixed(2) + '″';
+        $('radiusRow').classList.toggle('hidden', s.shape !== 'rect');
+        $('thresholdRow').classList.toggle('hidden', s.mode === 'alpha');
+        const G = gridFor(s);
+        const design = rasterise(s, G);
+        state = { s, G, design };
+        drawPreview(s, G, design);
+        updateStats(s, G, design);
+      });
+    }
+
+    // ---------- Export ----------
+    function download(blob, name) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }
+
+    function setStatus(msg, err) { const el = $('status'); el.textContent = msg; el.classList.toggle('err', !!err); }
+
+    function exportAs(kind) {
+      if (!state) return;
+      const { s, G, design } = state;
+      const name = ($('fname').value.trim() || 'patch').replace(/[^\w.-]+/g, '_');
+      setStatus('Building mesh…');
+      setTimeout(() => {
+        try {
+          const base = baseMesh(G.poly, 0, s.baseT);
+          const art = designMesh(design, s, G, s.baseT, s.baseT + s.relief);
+          let blob, file, tris;
+          if (kind === '3mf') { blob = threeMfBlob(base, art, s); file = name + '.3mf'; tris = base.count + art.count; }
+          else if (kind === 'stl') { blob = stlBlob([base, art]); file = name + '.stl'; tris = base.count + art.count; }
+          else if (kind === 'base') { blob = stlBlob([base]); file = name + '-base.stl'; tris = base.count; }
+          else { if (!art.count) throw new Error('There is no raised artwork to export.'); blob = stlBlob([art]); file = name + '-raised.stl'; tris = art.count; }
+          download(blob, file);
+          setStatus(`Saved ${file} — ${tris.toLocaleString()} triangles, ${(blob.size / 1048576).toFixed(1)} MB`);
+        } catch (e) { setStatus(e.message, true); }
+      }, 20);
+    }
+    $('ex3mf').onclick = () => exportAs('3mf');
+    $('exStl').onclick = () => exportAs('stl');
+    $('exBase').onclick = () => exportAs('base');
+    $('exArt').onclick = () => exportAs('art');
+
+    // ---------- Wiring ----------
+    function setSource(mode) {
+      sourceMode = mode;
+      $('tabImage').classList.toggle('active', mode === 'image');
+      $('tabText').classList.toggle('active', mode === 'text');
+      $('imageControls').classList.toggle('hidden', mode !== 'image');
+      $('textControls').classList.toggle('hidden', mode !== 'text');
+      if (mode === 'text') $('mode').value = 'dark';
+      render();
+    }
+    $('tabImage').onclick = () => setSource('image');
+    $('tabText').onclick = () => setSource('text');
+
+    function loadFile(file) {
+      if (!file || !file.type.startsWith('image/')) { setStatus('That file is not an image.', true); return; }
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        // SVGs without intrinsic size report 0 — fall back to a sensible raster size
+        if (!img.naturalWidth) { img.width = 1000; img.height = 1000; }
+        imageSource = img;
+        $('fileName').textContent = file.name || 'Pasted image';
+        if (file.name) $('fname').value = file.name.replace(/\.[^.]+$/, '');
+        setSource('image');
+        setStatus('');
+      };
+      img.onerror = () => setStatus('Could not read that image.', true);
+      img.src = url;
+    }
+    $('drop').onclick = () => $('file').click();
+    $('file').onchange = e => loadFile(e.target.files[0]);
+    const drop = $('drop');
+    ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+    ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+    drop.addEventListener('drop', e => loadFile(e.dataTransfer.files[0]));
+    window.addEventListener('paste', e => {
+      const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+      if (item) { e.preventDefault(); loadFile(item.getAsFile()); }
+    });
+
+    presetSel.onchange = () => { if (presetSel.value !== 'custom') applyPreset(+presetSel.value); render(); };
+    ['shape', 'width', 'height', 'radius'].forEach(id => $(id).addEventListener('input', () => { presetSel.value = 'custom'; render(); }));
+    document.querySelectorAll('.controls input, .controls select, .controls textarea').forEach(el => {
+      if (!['shape', 'width', 'height', 'radius', 'preset', 'file'].includes(el.id)) el.addEventListener('input', render);
+    });
+    document.querySelectorAll('[data-colors]').forEach(b => b.onclick = () => {
+      const [a, c] = b.dataset.colors.split(',');
+      $('baseColor').value = a; $('artColor').value = c; render();
+    });
+    window.addEventListener('resize', render);
+
+    applyPreset(0);
+    presetSel.value = 0;
+    render();
+  </script>
+</body>
+</html>
