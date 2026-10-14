@@ -114,7 +114,7 @@
 
       <h2>Technical details</h2>
       <p>The patch outline is built as a polygon (rounded rectangle, ellipse, shield or hexagon) and the base is a straight extrusion of it, triangulated as a fan since every shape is convex. The artwork is rasterised onto a grid at the chosen resolution with a canvas (<code>ctx.filter = blur()</code> for smoothing), thresholded, clipped using a signed-distance field of the outline, and cleaned with a connected-component pass that removes small islands and fills small holes.</p>
-      <p>The raised layer is meshed directly from the grid: top/bottom faces are merged into per-row runs and side walls are emitted only where an "on" cell meets an "off" one, merged along straight runs. Exports are written in-browser: binary STL via <code>DataView</code>, and 3MF as a hand-built uncompressed ZIP (with CRC-32) containing a model with two mesh objects joined as components. No libraries, nothing uploaded.</p>
+      <p>The raised layer is meshed directly from the grid: top/bottom faces are merged into per-row runs, and side walls are emitted only where an "on" cell meets an "off" one. Each run's edges get extra vertices wherever the neighbouring row changes, and it is triangulated as a zipper strip between them, so the mesh has no T-junctions. Cells that touch only at a corner are bridged, so the exported mesh is watertight and manifold with no slicer repair needed. Exports are written in-browser: binary STL via <code>DataView</code>, and 3MF as a hand-built uncompressed ZIP (with CRC-32) containing a model with two mesh objects joined as components. No libraries, nothing uploaded.</p>
     </div>
   </details>
 
