@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Turn an image or text into a two-color 3D-printable patch in standard hook-and-loop (morale patch) sizes, exported as 3MF or STL.">
+  <meta name="description" content="Turn an image or text into a 3D-printable patch with up to four colors in standard hook-and-loop (morale patch) sizes, exported as 3MF or STL.">
   <meta name="date" content="2026-10-14">
   <meta name="tags" content="3d, 3d-printing, stl, 3mf, patch, velcro, image, generator">
   <title>Hook &amp; Loop Patch Maker</title>
@@ -90,6 +90,14 @@
     .status { font-size: 0.8rem; color: #3fb950; margin-top: 0.6rem; min-height: 1.2em; }
     .status.err { color: #f85149; }
     .hidden { display: none !important; }
+    .swatches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem; margin-bottom: 0.6rem; }
+    .swatches label { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; font-size: 0.75rem; color: #8b949e; }
+    .swatches input { width: 100%; height: 30px; border: 1px solid #30363d; border-radius: 6px; background: #0d1117; padding: 2px; }
+    .swatches label.unused { opacity: 0.4; }
+    .cluster { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.45rem; font-size: 0.82rem; color: #8b949e; }
+    .cluster .chip { flex: 0 0 28px; height: 22px; border-radius: 4px; border: 1px solid #30363d; }
+    .cluster .pct { flex: 0 0 38px; text-align: right; font-variant-numeric: tabular-nums; }
+    .cluster select { flex: 1; min-width: 0; background: #0d1117; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px; padding: 0.3rem 0.4rem; font: inherit; font-size: 0.82rem; }
   </style>
 </head>
 <body>
@@ -99,22 +107,23 @@
     <summary>How this works</summary>
     <div class="docs">
       <h2>About</h2>
-      <p>Generates a two-color, 3D-printable patch in the common hook-and-loop (Velcro / "morale patch") sizes from any image or a line of text. The patch is a flat base plate in one color with the artwork raised on top in a second color, so it prints without supports and gives a crisp two-tone look with a single color change.</p>
+      <p>Generates a 3D-printable patch in the common hook-and-loop (Velcro / "morale patch") sizes from any image or a line of text. The patch is a flat base plate in one color with the artwork raised on top in up to three more colors — four filaments total, matching a 4-slot AMS — and prints without supports.</p>
 
       <h2>How to use</h2>
       <ul>
         <li>Pick a <strong>size preset</strong> (3″×2″ morale patch, 3.5″×2″ flag, rounds, name tapes, shield…) or type custom dimensions.</li>
         <li>Drop, choose, or paste (<code>Ctrl/⌘+V</code>) an image — or switch to <strong>Text</strong> for name tapes and callsigns.</li>
-        <li>Choose what gets raised: dark areas, light areas, or everything non-transparent (best for logos with transparent backgrounds). Tune the threshold, smoothing and speck removal until the preview looks clean.</li>
-        <li>Optionally add a raised <strong>border</strong>, then export.</li>
-        <li><strong>3MF (2 parts)</strong> loads into Bambu Studio / OrcaSlicer / PrusaSlicer as one object with two parts — assign a filament to each. Or export the STLs separately.</li>
-        <li>Single-extruder printers: export the combined STL and add a filament change (M600 / pause) at the Z height shown under the preview.</li>
+        <li><strong>Multiple colors</strong> (default) finds the main colors in the image and lists them. Choose a filament for each: the base (left flat), or Color 2, 3 or 4 (raised). Several image colors can share one filament. "Use detected colors" copies the image's colors into the filament swatches.</li>
+        <li>Or raise a single color: dark areas, light areas, or everything non-transparent (best for logos with transparent backgrounds), and pick which filament it uses. Tune smoothing and speck removal until the preview looks clean.</li>
+        <li>Optionally add a raised <strong>border</strong> in any filament color.</li>
+        <li><strong>Color layout</strong>: <em>Flat</em> puts all raised colors at the same height, side by side. This needs a multi-material printer (AMS / MMU). <em>Stacked</em> makes Color 2, 3 and 4 progressively taller, so each color starts at its own height and a single-extruder printer can do it with filament changes. The Z heights to change at are listed under the preview.</li>
+        <li><strong>3MF</strong> loads into Bambu Studio / OrcaSlicer / PrusaSlicer as one object with one part per color; assign a filament to each. You can also export one combined STL or a ZIP with one STL per color.</li>
       </ul>
       <p>Attaching: stick or glue adhesive-backed <em>hook</em> tape to the flat back (the loop side lives on bags, caps and plate carriers). A textured PEI plate gives the front-facing base a nice finish if you flip the model face-down — but then the color change goes at the base thickness from the bottom, which is what the default orientation already gives you.</p>
 
       <h2>Technical details</h2>
-      <p>The patch outline is built as a polygon (rounded rectangle, ellipse, shield or hexagon) and the base is a straight extrusion of it, triangulated as a fan since every shape is convex. The artwork is rasterised onto a grid at the chosen resolution with a canvas (<code>ctx.filter = blur()</code> for smoothing), thresholded, clipped using a signed-distance field of the outline, and cleaned with a connected-component pass that removes small islands and fills small holes.</p>
-      <p>The raised layer is meshed directly from the grid: top/bottom faces are merged into per-row runs, and side walls are emitted only where an "on" cell meets an "off" one. Each run's edges get extra vertices wherever the neighbouring row changes, and it is triangulated as a zipper strip between them, so the mesh has no T-junctions. Cells that touch only at a corner are bridged, so the exported mesh is watertight and manifold with no slicer repair needed. Exports are written in-browser: binary STL via <code>DataView</code>, and 3MF as a hand-built uncompressed ZIP (with CRC-32) containing a model with two mesh objects joined as components. No libraries, nothing uploaded.</p>
+      <p>The patch outline is built as a polygon (rounded rectangle, ellipse, shield or hexagon) and the base is a straight extrusion of it, triangulated as a fan since every shape is convex. The artwork is rasterised onto a grid at the chosen resolution with a canvas (<code>ctx.filter = blur()</code> for smoothing), then thresholded or, in multi-color mode, mapped to the nearest of K colors found by k-means (max-min seeding, run once per image on a 128 px thumbnail so the palette doesn't shift while you adjust). Each grid cell ends up with a filament label. The grid is clipped using a signed-distance field of the outline, then a connected-component pass merges any region smaller than the speck size into the label it borders most.</p>
+      <p>The raised layer is meshed directly from the grid: top/bottom faces are merged into per-row runs, and side walls are emitted only where an "on" cell meets an "off" one. Each run's edges get extra vertices wherever the neighbouring row changes, and it is triangulated as a zipper strip between them, so the mesh has no T-junctions. Each color is meshed as its own part; in stacked mode, part <em>k</em> is every cell at least <em>k</em> high. Cells of a part that touch only at a corner are bridged, so the exported mesh is watertight and manifold with no slicer repair needed. Exports are written in-browser: binary STL via <code>DataView</code>, and 3MF as a hand-built uncompressed ZIP (with CRC-32) containing one mesh object per color, joined as components of a single object, with a <code>basematerials</code> color per part. No libraries, nothing uploaded.</p>
     </div>
   </details>
 
@@ -166,9 +175,16 @@
               <option value="dark">Dark areas</option>
               <option value="light">Light areas</option>
               <option value="alpha">Non-transparent areas</option>
+              <option value="colors" selected>Multiple colors (auto-detect)</option>
             </select>
           </div>
           <div class="row" id="thresholdRow"><label for="threshold">Threshold</label><input type="range" id="threshold" min="1" max="254" value="128"><span class="val" id="thresholdVal"></span></div>
+          <div class="row" id="artSlotRow"><label for="artSlot">Art color</label><select id="artSlot"><option value="1">Color 2</option><option value="2">Color 3</option><option value="3">Color 4</option></select></div>
+          <div id="colorsControls" class="hidden" style="margin-bottom:0.55rem">
+            <div class="row"><label for="k">Image colors</label><input type="range" id="k" min="2" max="6" value="3"><span class="val" id="kVal"></span></div>
+            <div id="clusterList"></div>
+            <div class="row"><button type="button" id="matchColors" style="flex:1">Use detected colors as filament colors</button></div>
+          </div>
           <div class="row"><label for="blur">Smoothing</label><input type="range" id="blur" min="0" max="1.5" step="0.05" value="0.2"><span class="val" id="blurVal"></span></div>
           <div class="row"><label for="speck">Remove specks</label><input type="range" id="speck" min="0" max="4" step="0.1" value="0.5"><span class="val" id="speckVal"></span></div>
           <div class="row"><label for="fit">Fit</label>
@@ -187,8 +203,15 @@
         <div class="panel">
           <div class="section-title">Border &amp; thickness</div>
           <div class="row"><label for="rim">Border width</label><input type="range" id="rim" min="0" max="6" step="0.1" value="1.6"><span class="val" id="rimVal"></span></div>
+          <div class="row" id="rimSlotRow"><label for="rimSlot">Border color</label><select id="rimSlot"><option value="1">Color 2</option><option value="2">Color 3</option><option value="3">Color 4</option></select></div>
           <div class="row"><label for="baseT">Base</label><input type="range" id="baseT" min="0.6" max="4" step="0.1" value="1.6"><span class="val" id="baseTVal"></span></div>
-          <div class="row"><label for="relief">Raised art</label><input type="range" id="relief" min="0.2" max="3" step="0.1" value="0.8"><span class="val" id="reliefVal"></span></div>
+          <div class="row"><label for="stack">Color layout</label>
+            <select id="stack">
+              <option value="flat">Flat — multi-material (AMS/MMU)</option>
+              <option value="stacked">Stacked — color change by height</option>
+            </select>
+          </div>
+          <div class="row"><label for="relief" id="reliefLabel">Raised art</label><input type="range" id="relief" min="0.2" max="3" step="0.1" value="0.8"><span class="val" id="reliefVal"></span></div>
           <div class="row"><label for="res">Resolution</label>
             <select id="res">
               <option value="0.1">0.10 mm (fine, big files)</option>
@@ -202,13 +225,18 @@
         </div>
 
         <div class="panel">
-          <div class="section-title">Colors (preview + 3MF)</div>
-          <div class="row"><label for="baseColor">Base</label><input type="color" id="baseColor" value="#4b5320"><label for="artColor" style="margin-left:1rem;color:#c9d1d9">Raised</label><input type="color" id="artColor" value="#d8cfb0"></div>
-          <div class="row">
-            <button type="button" data-colors="#4b5320,#d8cfb0">OD / Tan</button>
-            <button type="button" data-colors="#1c1c1c,#9a9a9a">Black / Gray</button>
-            <button type="button" data-colors="#c2b280,#3b3b2f">Coyote</button>
-            <button type="button" data-colors="#1a1a1a,#f2f2f2">B / W</button>
+          <div class="section-title">Filament colors (preview + 3MF)</div>
+          <div class="swatches">
+            <label><input type="color" id="color0" value="#4b5320"><span>Base</span></label>
+            <label><input type="color" id="color1" value="#d8cfb0"><span>Color 2</span></label>
+            <label><input type="color" id="color2" value="#e07b24"><span>Color 3</span></label>
+            <label><input type="color" id="color3" value="#f5f5f5"><span>Color 4</span></label>
+          </div>
+          <div class="row" style="flex-wrap:wrap">
+            <button type="button" data-colors="#4b5320,#d8cfb0,#e07b24,#f5f5f5">OD / Tan</button>
+            <button type="button" data-colors="#1c1c1c,#9a9a9a,#f2f2f2,#4b5320">Black / Gray</button>
+            <button type="button" data-colors="#c2b280,#3b3b2f,#6b4f2a,#f2f2f2">Coyote</button>
+            <button type="button" data-colors="#1a1a1a,#f2f2f2,#c8102e,#0a3161">B / W / R / B</button>
           </div>
         </div>
       </div>
@@ -218,10 +246,9 @@
         <div class="stats" id="stats"></div>
         <div class="row" style="margin-top:0.8rem"><label for="fname" style="flex:0 0 auto">File name</label><input type="text" id="fname" value="patch"></div>
         <div class="exports">
-          <button class="primary" type="button" id="ex3mf">Download 3MF (2 parts)</button>
+          <button class="primary" type="button" id="ex3mf">Download 3MF (one part per color)</button>
           <button type="button" id="exStl">STL (combined)</button>
-          <button type="button" id="exBase">STL (base only)</button>
-          <button type="button" id="exArt">STL (raised only)</button>
+          <button type="button" id="exZip">STL per color (.zip)</button>
         </div>
         <div class="status" id="status"></div>
       </div>
@@ -268,8 +295,9 @@
       radius: v => v + ' mm', threshold: v => v, blur: v => (+v).toFixed(2) + ' mm',
       speck: v => (+v).toFixed(1) + ' mm²', scale: v => v + '%', offX: v => v + '%', offY: v => v + '%',
       margin: v => v + ' mm', rim: v => (+v ? (+v).toFixed(1) + ' mm' : 'off'),
-      baseT: v => (+v).toFixed(1) + ' mm', relief: v => (+v).toFixed(1) + ' mm',
+      baseT: v => (+v).toFixed(1) + ' mm', relief: v => (+v).toFixed(1) + ' mm', k: v => v,
     };
+    const SLOT_NAMES = ['Base', 'Color 2', 'Color 3', 'Color 4'];
 
     function readSettings() {
       const num = id => parseFloat($(id).value);
@@ -280,7 +308,8 @@
         mode: $('mode').value, threshold: num('threshold'), blur: num('blur'), speck: num('speck'),
         fit: $('fit').value, scale: num('scale') / 100, offX: num('offX') / 100, offY: num('offY') / 100,
         margin: num('margin'), rim: num('rim'), baseT: num('baseT'), relief: num('relief'), res: num('res'),
-        baseColor: $('baseColor').value, artColor: $('artColor').value,
+        k: num('k'), artSlot: +$('artSlot').value, rimSlot: +$('rimSlot').value, stack: $('stack').value,
+        colors: [0, 1, 2, 3].map(i => $('color' + i).value),
       };
     }
 
@@ -351,19 +380,20 @@
 
     // ---------- Artwork sources ----------
     let sourceMode = 'image';
-    let imageSource = makeDemoArt();
+    let imageSource = makeDemoArt(), imageId = 1;
 
     function makeDemoArt() {
       const c = document.createElement('canvas');
       c.width = 600; c.height = 400;
       const g = c.getContext('2d');
-      g.fillStyle = '#000';
+      g.fillStyle = '#e07b24';
       g.beginPath(); g.arc(400, 120, 55, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#2a2018';
       g.beginPath();
       g.moveTo(20, 330); g.lineTo(190, 90); g.lineTo(270, 200); g.lineTo(330, 140); g.lineTo(520, 330); g.closePath(); g.fill();
-      g.globalCompositeOperation = 'destination-out';
+      g.fillStyle = '#ffffff';
       g.beginPath(); g.moveTo(190, 90); g.lineTo(150, 146); g.lineTo(175, 135); g.lineTo(195, 155); g.lineTo(215, 130); g.lineTo(232, 146); g.closePath(); g.fill();
-      g.globalCompositeOperation = 'source-over';
+      g.fillStyle = '#2a2018';
       g.font = '900 70px "Arial Black", Arial, sans-serif'; g.textAlign = 'center';
       g.fillText('SEND IT', 300, 395);
       return c;
@@ -388,7 +418,105 @@
 
     const currentSource = () => sourceMode === 'text' ? makeTextArt() : imageSource;
 
+    // ---------- Colour detection (k-means on a thumbnail of the source) ----------
+    const thumbCanvas = document.createElement('canvas');
+    const thumbCtx = thumbCanvas.getContext('2d', { willReadFrequently: true });
+    let palette = { key: '', clusters: [], map: [] };
+
+    function detectPalette(src, K) {
+      const sc = Math.min(1, 128 / Math.max(src.width, src.height));
+      const w = Math.max(1, Math.round(src.width * sc)), h = Math.max(1, Math.round(src.height * sc));
+      thumbCanvas.width = w; thumbCanvas.height = h;
+      thumbCtx.clearRect(0, 0, w, h);
+      thumbCtx.drawImage(src, 0, 0, w, h);
+      const d = thumbCtx.getImageData(0, 0, w, h).data;
+      const px = [], border = [];
+      let transparent = 0;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const p = (y * w + x) * 4;
+        if (d[p + 3] < 128) { transparent++; continue; }
+        px.push([d[p], d[p + 1], d[p + 2]]);
+        border.push(x === 0 || y === 0 || x === w - 1 || y === h - 1);
+      }
+      if (!px.length) return { clusters: [], map: [] };
+      const dist = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
+      // deterministic max-min seeding, then Lloyd iterations
+      const mean = [0, 1, 2].map(c => px.reduce((n, q) => n + q[c], 0) / px.length);
+      const centers = [];
+      let far = 0;
+      px.forEach((q, i) => { if (dist(q, mean) > dist(px[far], mean)) far = i; });
+      centers.push(px[far].slice());
+      const minD = px.map(q => dist(q, centers[0]));
+      while (centers.length < K) {
+        let best = 0;
+        for (let i = 1; i < px.length; i++) if (minD[i] > minD[best]) best = i;
+        if (minD[best] < 1) break; // fewer distinct colours than K
+        centers.push(px[best].slice());
+        px.forEach((q, i) => { minD[i] = Math.min(minD[i], dist(q, centers[centers.length - 1])); });
+      }
+      const assign = new Int32Array(px.length);
+      for (let it = 0; it < 12; it++) {
+        const sum = centers.map(() => [0, 0, 0, 0]);
+        px.forEach((q, i) => {
+          let b = 0;
+          for (let c = 1; c < centers.length; c++) if (dist(q, centers[c]) < dist(q, centers[b])) b = c;
+          assign[i] = b; sum[b][0] += q[0]; sum[b][1] += q[1]; sum[b][2] += q[2]; sum[b][3]++;
+        });
+        sum.forEach((t, c) => { if (t[3]) centers[c] = [t[0] / t[3], t[1] / t[3], t[2] / t[3]]; });
+      }
+      const clusters = centers.map(rgb => ({ rgb, count: 0, border: 0 }));
+      assign.forEach((c, i) => { clusters[c].count++; if (border[i]) clusters[c].border++; });
+      const total = px.length + transparent;
+      const kept = clusters.filter(c => c.count).sort((a, b) => b.count - a.count);
+      kept.forEach(c => c.pct = c.count / total);
+      // Default mapping: an opaque background (the colour hugging the edges) stays flat as the
+      // base; every other colour is raised, largest first, into Color 2, 3, 4.
+      const hasAlpha = transparent / total > 0.02;
+      let bg = -1;
+      if (!hasAlpha) kept.forEach((c, i) => { if (bg < 0 || c.border > kept[bg].border) bg = i; });
+      // Colours beyond the three raised slots (often anti-aliasing halos) join the closest
+      // colour that already has a slot.
+      let next = 1;
+      const map = kept.map((c, i) => i === bg ? 0 : next <= 3 ? next++ : -1);
+      map.forEach((m, i) => {
+        if (m >= 0) return;
+        let near = -1;
+        map.forEach((m2, j) => { if (m2 >= 0 && (near < 0 || dist(kept[i].rgb, kept[j].rgb) < dist(kept[i].rgb, kept[near].rgb))) near = j; });
+        map[i] = map[near];
+      });
+      return { clusters: kept, map };
+    }
+
+    function getPalette(src, K) {
+      const key = (sourceMode === 'text' ? 'text|' + $('text').value + '|' + $('font').value : 'img|' + imageId) + '|' + K;
+      if (palette.key !== key) {
+        palette = { key, ...detectPalette(src, K) };
+        renderClusterList();
+      }
+      return palette;
+    }
+
+    function renderClusterList() {
+      const list = $('clusterList');
+      list.innerHTML = '';
+      palette.clusters.forEach((c, i) => {
+        const row = document.createElement('div');
+        row.className = 'cluster';
+        const [r, g, b] = c.rgb.map(Math.round);
+        row.innerHTML = `<span class="chip" style="background:rgb(${r},${g},${b})"></span><span class="pct">${Math.round(c.pct * 100)}%</span>`;
+        const sel = document.createElement('select');
+        sel.setAttribute('aria-label', 'Filament for detected color ' + (i + 1));
+        SLOT_NAMES.forEach((n, v) => sel.add(new Option(v ? n + ' (raised)' : 'Base (flat, not raised)', v)));
+        sel.value = palette.map[i];
+        sel.onchange = () => { palette.map[i] = +sel.value; render(); };
+        row.appendChild(sel);
+        list.appendChild(row);
+      });
+      if (!palette.clusters.length) list.innerHTML = '<div class="cluster">No opaque pixels found.</div>';
+    }
+
     // ---------- Rasterise + clean ----------
+    // The design grid holds a label per cell: 0 = nothing raised, 1..3 = filament slot (Color 2..4).
     const sampleCanvas = document.createElement('canvas');
     const sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
 
@@ -420,67 +548,92 @@
         g.drawImage(src, dx, dy, dw, dh);
         g.filter = 'none';
         const px = g.getImageData(0, 0, nx, ny).data;
+        const pal = s.mode === 'colors' ? getPalette(src, s.k) : null;
         const t = s.threshold;
         for (let n = 0, p = 0; n < nx * ny; n++, p += 4) {
           if (sdf[n] > artEdge) continue;
-          const a = px[p + 3];
-          if (a < 128) continue;
-          if (s.mode === 'alpha') { design[n] = 1; continue; }
-          // un-premultiply isn't needed: getImageData returns straight alpha
+          if (px[p + 3] < 128) continue;
+          if (pal) {
+            let best = -1, bd = Infinity;
+            pal.clusters.forEach((c, ci) => {
+              const d = (px[p] - c.rgb[0]) ** 2 + (px[p + 1] - c.rgb[1]) ** 2 + (px[p + 2] - c.rgb[2]) ** 2;
+              if (d < bd) { bd = d; best = ci; }
+            });
+            if (best >= 0) design[n] = pal.map[best];
+            continue;
+          }
+          if (s.mode === 'alpha') { design[n] = s.artSlot; continue; }
           const lum = 0.299 * px[p] + 0.587 * px[p + 1] + 0.114 * px[p + 2];
-          if (s.mode === 'dark' ? lum < t : lum >= t) design[n] = 1;
+          if (s.mode === 'dark' ? lum < t : lum >= t) design[n] = s.artSlot;
         }
         if (s.speck > 0) {
-          const minCells = s.speck / (cx * cy);
-          despeckle(design, nx, ny, 1, minCells);
-          despeckle(design, nx, ny, 0, minCells);
+          despeckle(design, nx, ny, s.speck / (cx * cy));
           for (let n = 0; n < nx * ny; n++) if (sdf[n] > artEdge) design[n] = 0;
         }
       }
       if (s.rim > 0) {
         for (let n = 0; n < nx * ny; n++) {
           const d = sdf[n];
-          if (d <= inBase && d > inBase - s.rim) design[n] = 1;
+          if (d <= inBase && d > inBase - s.rim) design[n] = s.rimSlot;
         }
       }
-      fixDiagonals(design, nx, ny, sdf, inBase);
+      fixDiagonals(design, nx, ny, sdf, inBase, s.stack === 'stacked');
       return design;
     }
 
-    // Cells touching only at a corner make a non-manifold edge; bridge them with an extra cell.
-    function fixDiagonals(grid, nx, ny, sdf, inBase) {
-      for (let pass = 0, changed = true; changed && pass < 8; pass++) {
-        changed = false;
-        for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) {
-          const a = j * nx + i, b = a + 1, c = a + nx, d = c + 1;
-          let fill;
-          if (grid[a] && grid[d] && !grid[b] && !grid[c]) fill = [b, c, a];
-          else if (grid[b] && grid[c] && !grid[a] && !grid[d]) fill = [a, d, b];
-          else continue;
-          if (sdf[fill[0]] <= inBase) grid[fill[0]] = 1;
-          else if (sdf[fill[1]] <= inBase) grid[fill[1]] = 1;
-          else grid[fill[2]] = 0;
-          changed = true;
-        }
-      }
-    }
-
-    // Flip 4-connected components of `value` smaller than minCells.
-    function despeckle(grid, nx, ny, value, minCells) {
+    // Merge every 4-connected region (of any label, including "nothing") smaller than
+    // minCells into the label it borders most — removes islands and fills pinholes.
+    function despeckle(grid, nx, ny, minCells) {
       const seen = new Uint8Array(nx * ny), stack = new Int32Array(nx * ny), comp = new Int32Array(nx * ny);
+      const nb = new Int32Array(4);
       for (let start = 0; start < nx * ny; start++) {
-        if (seen[start] || grid[start] !== value) continue;
+        if (seen[start]) continue;
+        const value = grid[start];
         let sp = 0, cn = 0;
+        nb.fill(0);
         stack[sp++] = start; seen[start] = 1;
         while (sp) {
           const n = stack[--sp]; comp[cn++] = n;
           const i = n % nx, j = (n - i) / nx;
-          if (i > 0      && !seen[n - 1]  && grid[n - 1]  === value) { seen[n - 1] = 1;  stack[sp++] = n - 1; }
-          if (i < nx - 1 && !seen[n + 1]  && grid[n + 1]  === value) { seen[n + 1] = 1;  stack[sp++] = n + 1; }
-          if (j > 0      && !seen[n - nx] && grid[n - nx] === value) { seen[n - nx] = 1; stack[sp++] = n - nx; }
-          if (j < ny - 1 && !seen[n + nx] && grid[n + nx] === value) { seen[n + nx] = 1; stack[sp++] = n + nx; }
+          const visit = m => {
+            if (grid[m] === value) { if (!seen[m]) { seen[m] = 1; stack[sp++] = m; } }
+            else nb[grid[m]]++;
+          };
+          if (i > 0) visit(n - 1);
+          if (i < nx - 1) visit(n + 1);
+          if (j > 0) visit(n - nx);
+          if (j < ny - 1) visit(n + nx);
         }
-        if (cn < minCells) for (let k = 0; k < cn; k++) grid[comp[k]] = 1 - value;
+        if (cn >= minCells) continue;
+        let to = -1;
+        for (let v = 0; v < 4; v++) if (nb[v] && (to < 0 || nb[v] > nb[to])) to = v;
+        if (to >= 0) for (let k = 0; k < cn; k++) grid[comp[k]] = to;
+      }
+    }
+
+    // Which cells belong to the printed part for slot k. Flat: exactly that colour.
+    // Stacked: every cell at least that tall (higher colours sit on top of lower ones).
+    const partMask = (stacked, k) => stacked ? v => v >= k : v => v === k;
+
+    // Cells touching only at a corner make a non-manifold edge; bridge them with an extra cell.
+    function fixDiagonals(grid, nx, ny, sdf, inBase, stacked) {
+      for (let pass = 0, changed = true; changed && pass < 10; pass++) {
+        changed = false;
+        for (let k = 1; k <= 3; k++) {
+          const inPart = partMask(stacked, k);
+          for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) {
+            const a = j * nx + i, b = a + 1, c = a + nx, d = c + 1;
+            const A = inPart(grid[a]), B = inPart(grid[b]), C = inPart(grid[c]), D = inPart(grid[d]);
+            let fill;
+            if (A && D && !B && !C) fill = [b, c, a];
+            else if (B && C && !A && !D) fill = [a, d, b];
+            else continue;
+            if (sdf[fill[0]] <= inBase) grid[fill[0]] = k;
+            else if (sdf[fill[1]] <= inBase) grid[fill[1]] = k;
+            else grid[fill[2]] = stacked ? k - 1 : 0;
+            changed = true;
+          }
+        }
       }
     }
 
@@ -506,10 +659,10 @@
       return m;
     }
 
-    function designMesh(design, s, G, z0, z1) {
+    function designMesh(design, inPart, s, G, z0, z1) {
       const { nx, ny, cx, cy } = G, m = new Soup();
       const X = i => -s.W / 2 + i * cx, Y = j => s.H / 2 - j * cy;
-      const on = (i, j) => i >= 0 && j >= 0 && i < nx && j < ny && design[j * nx + i] === 1;
+      const on = (i, j) => i >= 0 && j >= 0 && i < nx && j < ny && inPart(design[j * nx + i]);
 
       // Top + bottom faces as horizontal runs. To stay watertight (no T-junctions) each
       // run's long edges get a vertex wherever the neighbouring row changes state, and
@@ -570,7 +723,7 @@
     }
 
     // ---------- Writers ----------
-    function stlBlob(meshes) {
+    function stlBytes(meshes) {
       const total = meshes.reduce((n, m) => n + m.count, 0);
       const buf = new ArrayBuffer(84 + total * 50), dv = new DataView(buf);
       const head = 'Hook & Loop Patch Maker';
@@ -589,7 +742,7 @@
           o += 50;
         }
       }
-      return new Blob([buf], { type: 'model/stl' });
+      return new Uint8Array(buf);
     }
 
     function meshXml(m) {
@@ -612,18 +765,22 @@
       return `<mesh><vertices>${verts.join('')}</vertices><triangles>${tris.join('')}</triangles></mesh>`;
     }
 
-    function threeMfBlob(base, art, s) {
+    function threeMfBlob(parts, s) {
+      const mats = s.colors.map((c, i) => `<base name="${SLOT_NAMES[i]}" displaycolor="${c.toUpperCase()}FF"/>`).join('');
+      const objs = parts.map((p, i) =>
+        `<object id="${i + 2}" name="${p.name}" type="model" pid="1" pindex="${p.slot}">${meshXml(p.mesh)}</object>`).join('\n');
+      const comps = parts.map((p, i) => `<component objectid="${i + 2}"/>`).join('');
+      const top = parts.length + 2;
       const model =
 `<?xml version="1.0" encoding="UTF-8"?>
 <model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
 <metadata name="Application">Hook &amp; Loop Patch Maker</metadata>
 <resources>
-<basematerials id="1"><base name="Base" displaycolor="${s.baseColor.toUpperCase()}FF"/><base name="Raised" displaycolor="${s.artColor.toUpperCase()}FF"/></basematerials>
-<object id="2" name="Base" type="model" pid="1" pindex="0">${meshXml(base)}</object>
-<object id="3" name="Raised" type="model" pid="1" pindex="1">${meshXml(art)}</object>
-<object id="4" name="Patch" type="model"><components><component objectid="2"/><component objectid="3"/></components></object>
+<basematerials id="1">${mats}</basematerials>
+${objs}
+<object id="${top}" name="Patch" type="model"><components>${comps}</components></object>
 </resources>
-<build><item objectid="4"/></build>
+<build><item objectid="${top}"/></build>
 </model>`;
       const files = [
         ['[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8"?>
@@ -646,12 +803,12 @@
       return (c ^ 0xFFFFFFFF) >>> 0;
     }
 
-    // Minimal uncompressed ("stored") ZIP writer.
+    // Minimal uncompressed ("stored") ZIP writer; entries are strings or Uint8Arrays.
     function zipStore(files) {
       const enc = new TextEncoder(), parts = [], central = [];
       let offset = 0;
       for (const [name, text] of files) {
-        const nameB = enc.encode(name), data = enc.encode(text), crc = crc32(data);
+        const nameB = enc.encode(name), data = typeof text === 'string' ? enc.encode(text) : text, crc = crc32(data);
         const lh = new DataView(new ArrayBuffer(30));
         lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0, true); lh.setUint16(8, 0, true);
         lh.setUint16(10, 0, true); lh.setUint16(12, 0x21, true); lh.setUint32(14, crc, true);
@@ -703,25 +860,33 @@
       path.closePath();
       g.save();
       g.shadowColor = 'rgba(0,0,0,0.6)'; g.shadowBlur = 14; g.shadowOffsetY = 4;
-      g.fillStyle = s.baseColor; g.fill(path);
+      g.fillStyle = s.colors[0]; g.fill(path);
       g.restore();
 
-      // raised layer, with a darker copy offset for a hint of depth
+      // raised layers, each with a darker copy offset for a hint of depth
       const { nx, ny } = G;
       cellCanvas.width = nx; cellCanvas.height = ny;
       const img = cellCtx.createImageData(nx, ny);
-      const draw = (rgb, dx, dy) => {
+      const draw = (inPart, rgb, dx, dy) => {
         for (let n = 0, p = 0; n < nx * ny; n++, p += 4) {
-          img.data[p] = rgb[0]; img.data[p + 1] = rgb[1]; img.data[p + 2] = rgb[2]; img.data[p + 3] = design[n] ? 255 : 0;
+          img.data[p] = rgb[0]; img.data[p + 1] = rgb[1]; img.data[p + 2] = rgb[2]; img.data[p + 3] = inPart(design[n]) ? 255 : 0;
         }
         cellCtx.putImageData(img, 0, 0);
         g.imageSmoothingEnabled = k * G.cx < 2.5;
         g.drawImage(cellCanvas, ox - s.W / 2 * k + dx, oy - s.H / 2 * k + dy, s.W * k, s.H * k);
       };
-      const art = hexRgb(s.artColor);
       const depth = Math.max(1, Math.min(3, s.relief * k * 0.12));
-      draw(art.map(v => v * 0.45), depth, depth);
-      draw(art, 0, 0);
+      const shadow = [0, 0, 0];
+      if (s.stack === 'stacked') {
+        for (let slot = 1; slot <= 3; slot++) {
+          const inPart = partMask(true, slot);
+          draw(inPart, shadow, depth, depth);
+          draw(inPart, hexRgb(s.colors[slot]), 0, 0);
+        }
+      } else {
+        draw(v => v > 0, shadow, depth, depth);
+        for (let slot = 1; slot <= 3; slot++) draw(partMask(false, slot), hexRgb(s.colors[slot]), 0, 0);
+      }
 
       g.strokeStyle = 'rgba(255,255,255,0.15)'; g.lineWidth = 1; g.stroke(path);
 
@@ -732,16 +897,50 @@
       g.fillText(`${s.H.toFixed(1)} mm (${(s.H / IN).toFixed(2)}″)`, 0, 0); g.restore();
     }
 
+    // Raised parts that will be printed: { slot, z0, z1, inPart }.
+    function raisedParts(s, design) {
+      const counts = [0, 0, 0, 0];
+      for (let n = 0; n < design.length; n++) counts[design[n]]++;
+      const parts = [];
+      if (s.stack === 'stacked') {
+        let top = 0;
+        for (let k = 1; k <= 3; k++) if (counts[k]) top = k;
+        for (let k = 1; k <= top; k++)
+          parts.push({ slot: k, z0: s.baseT + (k - 1) * s.relief, z1: s.baseT + k * s.relief, inPart: partMask(true, k) });
+      } else {
+        for (let k = 1; k <= 3; k++)
+          if (counts[k]) parts.push({ slot: k, z0: s.baseT, z1: s.baseT + s.relief, inPart: partMask(false, k) });
+      }
+      return { parts, counts };
+    }
+
     function updateStats(s, G, design) {
-      let on = 0, inside = 0;
+      const { parts, counts } = raisedParts(s, design);
+      let inside = 0;
       const inBase = -0.71 * Math.max(G.cx, G.cy);
-      for (let n = 0; n < design.length; n++) { if (G.sdf[n] <= inBase) inside++; if (design[n]) on++; }
+      for (let n = 0; n < design.length; n++) if (G.sdf[n] <= inBase) inside++;
+      const on = counts[1] + counts[2] + counts[3];
       const pct = inside ? Math.round(100 * on / inside) : 0;
+      const height = parts.length ? parts[parts.length - 1].z1 : s.baseT;
+      const used = [0, ...parts.map(p => p.slot)];
+      document.querySelectorAll('.swatches label').forEach((l, i) => l.classList.toggle('unused', !used.includes(i)));
+      const dot = i => `<span style="display:inline-block;width:0.8em;height:0.8em;border-radius:2px;vertical-align:-0.05em;background:${s.colors[i]}"></span>`;
+      let plan;
+      if (!parts.length) plan = '<span style="color:#d29922">Nothing raised — check the threshold / mode.</span>';
+      else if (s.stack === 'stacked') {
+        plan = 'Single extruder: start in ' + dot(0) + ' Base, then change filament at ' +
+          parts.map(p => `<b>Z = ${p.z0.toFixed(2)} mm</b> → ${dot(p.slot)} ${SLOT_NAMES[p.slot]}`).join(', ') + '.';
+      } else if (parts.length === 1) {
+        plan = `Single extruder: color change / pause at <b>Z = ${s.baseT.toFixed(2)} mm</b> → ${dot(parts[0].slot)} ${SLOT_NAMES[parts[0].slot]}.`;
+      } else {
+        plan = `<b>${parts.length + 1} filaments</b> side by side on the same layers — needs a multi-material printer (AMS / MMU). ` +
+          'For a single extruder switch Color layout to <i>Stacked</i>.';
+      }
       $('stats').innerHTML =
         `<b>${s.W.toFixed(1)} × ${s.H.toFixed(1)} mm</b> (${(s.W / IN).toFixed(2)}″ × ${(s.H / IN).toFixed(2)}″) · ` +
-        `total height <b>${(s.baseT + s.relief).toFixed(1)} mm</b> · raised coverage ${pct}%<br>` +
-        `Single-extruder: color change / pause at <b>Z = ${s.baseT.toFixed(2)} mm</b> (first layer of the raised art).<br>` +
-        `Grid ${G.nx} × ${G.ny} cells at ${G.cx.toFixed(3)} mm` + (pct === 0 ? ' · <span style="color:#d29922">nothing raised — check threshold / mode</span>' : '');
+        `total height <b>${height.toFixed(1)} mm</b> · raised coverage ${pct}%<br>` +
+        `Colors: ${used.map(i => dot(i) + ' ' + SLOT_NAMES[i]).join(' &nbsp;')}<br>${plan}<br>` +
+        `Grid ${G.nx} × ${G.ny} cells at ${G.cx.toFixed(3)} mm`;
     }
 
     let pending = false;
@@ -755,7 +954,11 @@
         $('widthIn').textContent = (s.W / IN).toFixed(2) + '″';
         $('heightIn').textContent = (s.H / IN).toFixed(2) + '″';
         $('radiusRow').classList.toggle('hidden', s.shape !== 'rect');
-        $('thresholdRow').classList.toggle('hidden', s.mode === 'alpha');
+        $('thresholdRow').classList.toggle('hidden', s.mode === 'alpha' || s.mode === 'colors');
+        $('artSlotRow').classList.toggle('hidden', s.mode === 'colors');
+        $('colorsControls').classList.toggle('hidden', s.mode !== 'colors');
+        $('rimSlotRow').classList.toggle('hidden', !(s.rim > 0));
+        $('reliefLabel').textContent = s.stack === 'stacked' ? 'Step per color' : 'Raised art';
         const G = gridFor(s);
         const design = rasterise(s, G);
         state = { s, G, design };
@@ -781,22 +984,25 @@
       setStatus('Building mesh…');
       setTimeout(() => {
         try {
-          const base = baseMesh(G.poly, 0, s.baseT);
-          const art = designMesh(design, s, G, s.baseT, s.baseT + s.relief);
-          let blob, file, tris;
-          if (kind === '3mf') { blob = threeMfBlob(base, art, s); file = name + '.3mf'; tris = base.count + art.count; }
-          else if (kind === 'stl') { blob = stlBlob([base, art]); file = name + '.stl'; tris = base.count + art.count; }
-          else if (kind === 'base') { blob = stlBlob([base]); file = name + '-base.stl'; tris = base.count; }
-          else { if (!art.count) throw new Error('There is no raised artwork to export.'); blob = stlBlob([art]); file = name + '-raised.stl'; tris = art.count; }
+          const parts = [{ name: 'Base', slot: 0, mesh: baseMesh(G.poly, 0, s.baseT) }];
+          for (const p of raisedParts(s, design).parts)
+            parts.push({ name: SLOT_NAMES[p.slot], slot: p.slot, mesh: designMesh(design, p.inPart, s, G, p.z0, p.z1) });
+          const tris = parts.reduce((n, p) => n + p.mesh.count, 0);
+          let blob, file;
+          if (kind === '3mf') { blob = threeMfBlob(parts, s); file = name + '.3mf'; }
+          else if (kind === 'stl') { blob = new Blob([stlBytes(parts.map(p => p.mesh))], { type: 'model/stl' }); file = name + '.stl'; }
+          else {
+            const files = parts.map(p => [`${name}-${p.slot}-${p.name.toLowerCase().replace(/\s+/g, '')}.stl`, stlBytes([p.mesh])]);
+            blob = zipStore(files); file = name + '-stl.zip';
+          }
           download(blob, file);
-          setStatus(`Saved ${file} — ${tris.toLocaleString()} triangles, ${(blob.size / 1048576).toFixed(1)} MB`);
+          setStatus(`Saved ${file} — ${parts.length} part${parts.length > 1 ? 's' : ''}, ${tris.toLocaleString()} triangles, ${(blob.size / 1048576).toFixed(1)} MB`);
         } catch (e) { setStatus(e.message, true); }
       }, 20);
     }
     $('ex3mf').onclick = () => exportAs('3mf');
     $('exStl').onclick = () => exportAs('stl');
-    $('exBase').onclick = () => exportAs('base');
-    $('exArt').onclick = () => exportAs('art');
+    $('exZip').onclick = () => exportAs('zip');
 
     // ---------- Wiring ----------
     function setSource(mode) {
@@ -818,7 +1024,7 @@
       img.onload = () => {
         // SVGs without intrinsic size report 0 — fall back to a sensible raster size
         if (!img.naturalWidth) { img.width = 1000; img.height = 1000; }
-        imageSource = img;
+        imageSource = img; imageId++;
         $('fileName').textContent = file.name || 'Pasted image';
         if (file.name) $('fname').value = file.name.replace(/\.[^.]+$/, '');
         setSource('image');
@@ -838,14 +1044,23 @@
       if (item) { e.preventDefault(); loadFile(item.getAsFile()); }
     });
 
+    $('matchColors').onclick = () => {
+      for (let slot = 0; slot <= 3; slot++) {
+        const i = palette.map.indexOf(slot); // clusters are sorted largest first
+        if (i < 0) continue;
+        $('color' + slot).value = '#' + palette.clusters[i].rgb.map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
+      }
+      render();
+    };
+
     presetSel.onchange = () => { if (presetSel.value !== 'custom') applyPreset(+presetSel.value); render(); };
     ['shape', 'width', 'height', 'radius'].forEach(id => $(id).addEventListener('input', () => { presetSel.value = 'custom'; render(); }));
     document.querySelectorAll('.controls input, .controls select, .controls textarea').forEach(el => {
       if (!['shape', 'width', 'height', 'radius', 'preset', 'file'].includes(el.id)) el.addEventListener('input', render);
     });
     document.querySelectorAll('[data-colors]').forEach(b => b.onclick = () => {
-      const [a, c] = b.dataset.colors.split(',');
-      $('baseColor').value = a; $('artColor').value = c; render();
+      b.dataset.colors.split(',').forEach((c, i) => { $('color' + i).value = c; });
+      render();
     });
     window.addEventListener('resize', render);
 
