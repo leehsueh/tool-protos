@@ -90,6 +90,8 @@
     .status { font-size: 0.8rem; color: #3fb950; margin-top: 0.6rem; min-height: 1.2em; }
     .status.err { color: #f85149; }
     .hidden { display: none !important; }
+    .seg { flex: 1; display: flex; gap: 0.35rem; }
+    .seg button { flex: 1; padding: 0.35rem 0.4rem; }
     .swatches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem; margin-bottom: 0.6rem; }
     .swatches label { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; font-size: 0.75rem; color: #8b949e; }
     .swatches input { width: 100%; height: 30px; border: 1px solid #30363d; border-radius: 6px; background: #0d1117; padding: 2px; }
@@ -115,6 +117,7 @@
         <li>Drop, choose, or paste (<code>Ctrl/⌘+V</code>) an image — or switch to <strong>Text</strong> for name tapes and callsigns.</li>
         <li><strong>Multiple colors</strong> (default) finds the main colors in the image and lists them. Choose a filament for each: the base (left flat), or Color 2, 3 or 4 (raised). Several image colors can share one filament. "Use detected colors" copies the image's colors into the filament swatches.</li>
         <li>Or raise a single color: dark areas, light areas, or everything non-transparent (best for logos with transparent backgrounds), and pick which filament it uses. Tune smoothing and speck removal until the preview looks clean.</li>
+        <li><strong>Landscape / Portrait</strong> swaps the patch's width and height (and is remembered when you pick another preset). <strong>Rotate patch</strong> turns the whole thing 90° — outline and artwork together, e.g. a shield pointing sideways. <strong>Rotate art</strong> spins only the artwork inside the patch, by any angle or in 90° steps.</li>
         <li>Optionally add a raised <strong>border</strong> in any filament color.</li>
         <li><strong>Color layout</strong>: <em>Flat</em> puts all raised colors at the same height, side by side. This needs a multi-material printer (AMS / MMU). <em>Stacked</em> makes Color 2, 3 and 4 progressively taller, so each color starts at its own height and a single-extruder printer can do it with filament changes. The Z heights to change at are listed under the preview.</li>
         <li><strong>3MF</strong> loads into Bambu Studio / OrcaSlicer / PrusaSlicer as one object with one part per color; assign a filament to each. You can also export one combined STL or a ZIP with one STL per color.</li>
@@ -145,6 +148,13 @@
           </div>
           <div class="row"><label for="width">Width</label><input type="number" id="width" min="10" max="250" step="0.1"><span class="unit" id="widthIn"></span></div>
           <div class="row"><label for="height">Height</label><input type="number" id="height" min="10" max="250" step="0.1"><span class="unit" id="heightIn"></span></div>
+          <div class="row"><label>Orientation</label>
+            <div class="seg">
+              <button type="button" id="orLandscape" title="Wider than tall">Landscape</button>
+              <button type="button" id="orPortrait" title="Taller than wide">Portrait</button>
+            </div>
+          </div>
+          <div class="row"><label>Rotate patch</label><button type="button" id="rotPatch" style="flex:1" title="Turn the whole patch — outline and artwork — 90° clockwise">↻ 90°</button><span class="val" id="patchRotVal"></span></div>
           <div class="row" id="radiusRow"><label for="radius">Corner radius</label><input type="range" id="radius" min="0" max="25" step="0.5"><span class="val" id="radiusVal"></span></div>
         </div>
 
@@ -193,6 +203,14 @@
               <option value="cover">Cover (crop)</option>
               <option value="stretch">Stretch</option>
             </select>
+          </div>
+          <div class="row"><label for="artRot">Rotate art</label><input type="range" id="artRot" min="-180" max="180" step="1" value="0"><span class="val" id="artRotVal"></span></div>
+          <div class="row"><label></label>
+            <div class="seg">
+              <button type="button" id="artCCW" title="Rotate artwork 90° counter-clockwise">⟲ 90°</button>
+              <button type="button" id="artCW" title="Rotate artwork 90° clockwise">⟳ 90°</button>
+              <button type="button" id="artZero" title="Reset artwork rotation">0°</button>
+            </div>
           </div>
           <div class="row"><label for="scale">Scale</label><input type="range" id="scale" min="20" max="200" value="100"><span class="val" id="scaleVal"></span></div>
           <div class="row"><label for="offX">Offset X</label><input type="range" id="offX" min="-50" max="50" value="0"><span class="val" id="offXVal"></span></div>
@@ -284,8 +302,13 @@
     function applyPreset(i) {
       const p = PRESETS[i];
       $('shape').value = p.shape;
-      $('width').value = +(p.w * IN).toFixed(1);
-      $('height').value = +(p.h * IN).toFixed(1);
+      let w = p.w, h = p.h;
+      if (orientPref && w !== h && (orientPref === 'portrait') !== (h > w)) [w, h] = [h, w];
+      $('width').value = +(w * IN).toFixed(1);
+      $('height').value = +(h * IN).toFixed(1);
+      // a fresh preset starts unrotated; take back the turn "Rotate patch" gave the artwork
+      if (patchRot) $('artRot').value = ((+$('artRot').value - patchRot + 540) % 360) - 180;
+      patchRot = 0;
       $('radius').value = p.r;
       if (p.label.startsWith('Name tape') || p.label.startsWith('Blood')) setSource('text');
     }
@@ -295,8 +318,10 @@
       radius: v => v + ' mm', threshold: v => v, blur: v => (+v).toFixed(2) + ' mm',
       speck: v => (+v).toFixed(1) + ' mm²', scale: v => v + '%', offX: v => v + '%', offY: v => v + '%',
       margin: v => v + ' mm', rim: v => (+v ? (+v).toFixed(1) + ' mm' : 'off'),
-      baseT: v => (+v).toFixed(1) + ' mm', relief: v => (+v).toFixed(1) + ' mm', k: v => v,
+      baseT: v => (+v).toFixed(1) + ' mm', relief: v => (+v).toFixed(1) + ' mm', k: v => v, artRot: v => v + '°',
     };
+    let patchRot = 0;     // whole-patch rotation, degrees clockwise (0/90/180/270)
+    let orientPref = null; // 'landscape' | 'portrait' once the user picks one
     const SLOT_NAMES = ['Base', 'Color 2', 'Color 3', 'Color 4'];
 
     function readSettings() {
@@ -308,13 +333,23 @@
         mode: $('mode').value, threshold: num('threshold'), blur: num('blur'), speck: num('speck'),
         fit: $('fit').value, scale: num('scale') / 100, offX: num('offX') / 100, offY: num('offY') / 100,
         margin: num('margin'), rim: num('rim'), baseT: num('baseT'), relief: num('relief'), res: num('res'),
-        k: num('k'), artSlot: +$('artSlot').value, rimSlot: +$('rimSlot').value, stack: $('stack').value,
+        artRot: num('artRot'), orot: patchRot, k: num('k'), artSlot: +$('artSlot').value, rimSlot: +$('rimSlot').value, stack: $('stack').value,
         colors: [0, 1, 2, 3].map(i => $('color' + i).value),
       };
     }
 
     // ---------- Outline geometry (model coords: mm, origin at centre, y up, CCW) ----------
+    // The shape is built upright in its own frame, then turned by the patch rotation so the
+    // final bounding box is s.W × s.H (rotating 90° swaps the frame's width and height).
     function outline(s) {
+      const odd = s.orot % 180 !== 0;
+      let pts = uprightOutline(s.shape, odd ? s.H : s.W, odd ? s.W : s.H, s.r);
+      for (let q = 0; q < s.orot / 90; q++) pts = pts.map(([x, y]) => [y, -x]); // 90° clockwise
+      return pts;
+    }
+
+    function uprightOutline(shape, W, H, radius) {
+      const s = { shape, W, H, r: radius };
       const hx = s.W / 2, hy = s.H / 2, pts = [];
       if (s.shape === 'rect') {
         const r = Math.min(Math.max(0, s.r), hx - 0.01, hy - 0.01);
@@ -340,8 +375,10 @@
         quad([-1, -0.12], [-1, -0.62], [0, -1], 32, false);
         quad([0, -1], [1, -0.62], [1, -0.12], 32, true);
         return pts.map(([x, y]) => [x * hx, y * hy]);
-      } else { // hex, points left/right
+      } else if (W >= H) { // hex, points along the longer side
         return [[hx, 0], [hx / 2, hy], [-hx / 2, hy], [-hx, 0], [-hx / 2, -hy], [hx / 2, -hy]];
+      } else {
+        return [[0, hy], [-hx, hy / 2], [-hx, -hy / 2], [0, -hy], [hx, -hy / 2], [hx, hy / 2]];
       }
       return pts;
     }
@@ -366,7 +403,7 @@
       const nx = Math.max(4, Math.round(s.W / s.res)), ny = Math.max(4, Math.round(s.H / s.res));
       const cx = s.W / nx, cy = s.H / ny;
       const poly = outline(s);
-      const key = [s.shape, s.W, s.H, s.r, s.res].join('|');
+      const key = [s.shape, s.W, s.H, s.r, s.res, s.orot].join('|');
       if (sdfCache.key !== key) {
         const sdf = new Float32Array(nx * ny);
         for (let j = 0; j < ny; j++) {
@@ -534,18 +571,25 @@
         const inset = s.rim + s.margin;
         const bw = Math.max(1, (s.W - 2 * inset) / cx), bh = Math.max(1, (s.H - 2 * inset) / cy);
         const iw = src.width, ih = src.height;
+        // Art rotation is clockwise; contain/cover fit the rotated image's bounding box.
+        const ang = s.artRot * Math.PI / 180, ca = Math.abs(Math.cos(ang)), sa = Math.abs(Math.sin(ang));
         let dw, dh;
-        if (s.fit === 'stretch') { dw = bw; dh = bh; }
-        else {
+        if (s.fit === 'stretch') {
+          [dw, dh] = Math.round(s.artRot / 90) % 2 ? [bh, bw] : [bw, bh];
+        } else {
           // image pixels are square; cells may be very slightly non-square, so fit in mm space
-          const k = (s.fit === 'contain' ? Math.min : Math.max)(bw * cx / iw, bh * cy / ih);
+          const rw = iw * ca + ih * sa, rh = iw * sa + ih * ca;
+          const k = (s.fit === 'contain' ? Math.min : Math.max)(bw * cx / rw, bh * cy / rh);
           dw = iw * k / cx; dh = ih * k / cy;
         }
         dw *= s.scale; dh *= s.scale;
-        const dx = nx / 2 - dw / 2 + s.offX * bw, dy = ny / 2 - dh / 2 - s.offY * bh;
         g.filter = s.blur > 0 ? `blur(${(s.blur / cx).toFixed(2)}px)` : 'none';
         g.imageSmoothingQuality = 'high';
-        g.drawImage(src, dx, dy, dw, dh);
+        g.save();
+        g.translate(nx / 2 + s.offX * bw, ny / 2 - s.offY * bh);
+        g.rotate(ang);
+        g.drawImage(src, -dw / 2, -dh / 2, dw, dh);
+        g.restore();
         g.filter = 'none';
         const px = g.getImageData(0, 0, nx, ny).data;
         const pal = s.mode === 'colors' ? getPalette(src, s.k) : null;
@@ -954,6 +998,9 @@ ${objs}
         $('widthIn').textContent = (s.W / IN).toFixed(2) + '″';
         $('heightIn').textContent = (s.H / IN).toFixed(2) + '″';
         $('radiusRow').classList.toggle('hidden', s.shape !== 'rect');
+        $('orLandscape').classList.toggle('active', s.W > s.H);
+        $('orPortrait').classList.toggle('active', s.H > s.W);
+        $('patchRotVal').textContent = s.orot + '°';
         $('thresholdRow').classList.toggle('hidden', s.mode === 'alpha' || s.mode === 'colors');
         $('artSlotRow').classList.toggle('hidden', s.mode === 'colors');
         $('colorsControls').classList.toggle('hidden', s.mode !== 'colors');
@@ -1043,6 +1090,31 @@ ${objs}
       const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
       if (item) { e.preventDefault(); loadFile(item.getAsFile()); }
     });
+
+    // Orientation: swap width/height so the patch is wider (landscape) or taller (portrait).
+    function setOrientation(o) {
+      orientPref = o;
+      const w = parseFloat($('width').value), h = parseFloat($('height').value);
+      if (w !== h && (o === 'portrait') !== (h > w)) { $('width').value = h; $('height').value = w; }
+      render();
+    }
+    $('orLandscape').onclick = () => setOrientation('landscape');
+    $('orPortrait').onclick = () => setOrientation('portrait');
+
+    const wrapDeg = d => ((d + 180) % 360 + 360) % 360 - 180;
+    // Rotating the whole patch turns the outline and the artwork together.
+    $('rotPatch').onclick = () => {
+      patchRot = (patchRot + 90) % 360;
+      const w = $('width').value; $('width').value = $('height').value; $('height').value = w;
+      $('artRot').value = wrapDeg(+$('artRot').value + 90);
+      const sx = $('offX').value; $('offX').value = $('offY').value; $('offY').value = -sx; // offsets turn too
+      render();
+    };
+    // Step to the next quarter turn in that direction (so 30° → 90° clockwise, → 0° counter-clockwise).
+    const turnArt = dir => { const v = +$('artRot').value; $('artRot').value = wrapDeg(dir > 0 ? Math.floor(v / 90) * 90 + 90 : Math.ceil(v / 90) * 90 - 90); render(); };
+    $('artCW').onclick = () => turnArt(1);
+    $('artCCW').onclick = () => turnArt(-1);
+    $('artZero').onclick = () => { $('artRot').value = 0; render(); };
 
     $('matchColors').onclick = () => {
       for (let slot = 0; slot <= 3; slot++) {
