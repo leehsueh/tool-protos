@@ -96,10 +96,18 @@
     .swatches label { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; font-size: 0.75rem; color: #8b949e; }
     .swatches input { width: 100%; height: 30px; border: 1px solid #30363d; border-radius: 6px; background: #0d1117; padding: 2px; }
     .swatches label.unused { opacity: 0.4; }
-    .cluster { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.45rem; font-size: 0.82rem; color: #8b949e; }
-    .cluster .chip { flex: 0 0 28px; height: 22px; border-radius: 4px; border: 1px solid #30363d; }
-    .cluster .pct { flex: 0 0 38px; text-align: right; font-variant-numeric: tabular-nums; }
-    .cluster select { flex: 1; min-width: 0; background: #0d1117; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px; padding: 0.3rem 0.4rem; font: inherit; font-size: 0.82rem; }
+    .cmap-row { display: flex; align-items: center; gap: 0.4rem; padding: 2px 4px; margin: 0 -4px; border-radius: 6px; font-size: 0.8rem; color: #8b949e; }
+    .cmap-row:hover { background: #1f242c; }
+    .cmap-row .chip { flex: 0 0 26px; height: 22px; border-radius: 4px; border: 1px solid #30363d; cursor: pointer; }
+    .cmap-row .pct { flex: 0 0 32px; text-align: right; font-variant-numeric: tabular-nums; }
+    .cmap-row .slots { flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+    .cmap-row .slot { padding: 0; height: 22px; font-size: 0.72rem; font-weight: 600; border: 2px solid transparent; opacity: 0.28; }
+    .cmap-row .slot:hover { opacity: 0.7; }
+    .cmap-row .slot.on { opacity: 1; border-color: #58a6ff; box-shadow: 0 0 0 1px #0d1117 inset; }
+    .cmap-head { margin-bottom: 2px; }
+    .cmap-head:hover { background: none; }
+    .cmap-head .chip-h { flex: 0 0 calc(58px + 0.4rem); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    #mapHeads span { text-align: center; font-size: 0.68rem; font-weight: 600; border-radius: 4px; padding: 1px 0; }
   </style>
 </head>
 <body>
@@ -115,7 +123,8 @@
       <ul>
         <li>Pick a <strong>size preset</strong> (3″×2″ morale patch, 3.5″×2″ flag, rounds, name tapes, shield…) or type custom dimensions.</li>
         <li>Drop, choose, or paste (<code>Ctrl/⌘+V</code>) an image — or switch to <strong>Text</strong> for name tapes and callsigns.</li>
-        <li><strong>Multiple colors</strong> (default) finds the main colors in the image and lists them. Choose a filament for each: the base (left flat), or Color 2, 3 or 4 (raised). Several image colors can share one filament. "Use detected colors" copies the image's colors into the filament swatches.</li>
+        <li><strong>Multiple colors</strong> (default) works in two stages. <em>Detect</em> reduces the image to up to 12 representative colors (adjustable 4–16). <em>Map</em> lists them with four buttons each — <strong>B</strong>ase (flat), <strong>2</strong>, <strong>3</strong>, <strong>4</strong> (raised) — so you decide which filament every detected color prints in. <strong>Auto-group</strong> pre-fills the mapping for 2, 3 or 4 filaments, and <strong>Reset</strong> re-runs it after manual changes.</li>
+        <li>Hover a detected color (or tap its swatch) to highlight where it sits on the patch. Switch the preview to <strong>Detected colors</strong> to check the stage-1 result before filament mapping. "Use detected colors as filament colors" copies each filament's largest detected color into its swatch.</li>
         <li>Or raise a single color: dark areas, light areas, or everything non-transparent (best for logos with transparent backgrounds), and pick which filament it uses. Tune smoothing and speck removal until the preview looks clean.</li>
         <li><strong>Landscape / Portrait</strong> swaps the patch's width and height (and is remembered when you pick another preset). <strong>Rotate patch</strong> turns the whole thing 90° — outline and artwork together, e.g. a shield pointing sideways. <strong>Rotate art</strong> spins only the artwork inside the patch, by any angle or in 90° steps.</li>
         <li>Optionally add a raised <strong>border</strong> in any filament color.</li>
@@ -125,7 +134,7 @@
       <p>Attaching: stick or glue adhesive-backed <em>hook</em> tape to the flat back (the loop side lives on bags, caps and plate carriers). A textured PEI plate gives the front-facing base a nice finish if you flip the model face-down — but then the color change goes at the base thickness from the bottom, which is what the default orientation already gives you.</p>
 
       <h2>Technical details</h2>
-      <p>The patch outline is built as a polygon (rounded rectangle, ellipse, shield or hexagon) and the base is a straight extrusion of it, triangulated as a fan since every shape is convex. The artwork is rasterised onto a grid at the chosen resolution with a canvas (<code>ctx.filter = blur()</code> for smoothing), then thresholded or, in multi-color mode, mapped to the nearest of K colors found by k-means (max-min seeding, run once per image on a 128 px thumbnail so the palette doesn't shift while you adjust). Each grid cell ends up with a filament label. The grid is clipped using a signed-distance field of the outline, then a connected-component pass merges any region smaller than the speck size into the label it borders most.</p>
+      <p>The patch outline is built as a polygon (rounded rectangle, ellipse, shield or hexagon) and the base is a straight extrusion of it, triangulated as a fan since every shape is convex. The artwork is rasterised onto a grid at the chosen resolution with a canvas (<code>ctx.filter = blur()</code> for smoothing), then thresholded or, in multi-color mode, reduced in two stages. Stage 1 reads the image at up to 512 px, bins near-identical colors, and runs weighted k-means (k-means++ seeding with a fixed seed, so the palette is repeatable) in CIELAB, where straight-line distance (ΔE) follows how different two colors look rather than how far apart their RGB numbers are. It runs once per image, so the palette doesn't shift as you move or scale the art. Stage 2 auto-groups those colors into filaments: the color hugging the image edges, plus anything within ΔE 20 of it, becomes the flat base (or the transparency does, for images with alpha), and the remaining artwork colors are clustered by size-weighted k-means into the raised filaments, largest first. Each grid cell takes its nearest detected color by ΔE, then that color's filament. The grid is clipped using a signed-distance field of the outline, then a connected-component pass merges any region smaller than the speck size into the label it borders most.</p>
       <p>The raised layer is meshed directly from the grid: top/bottom faces are merged into per-row runs, and side walls are emitted only where an "on" cell meets an "off" one. Each run's edges get extra vertices wherever the neighbouring row changes, and it is triangulated as a zipper strip between them, so the mesh has no T-junctions. Each color is meshed as its own part; in stacked mode, part <em>k</em> is every cell at least <em>k</em> high. Cells of a part that touch only at a corner are bridged, so the exported mesh is watertight and manifold with no slicer repair needed. Exports are written in-browser: binary STL via <code>DataView</code>, and 3MF as a hand-built uncompressed ZIP (with CRC-32) containing one mesh object per color, joined as components of a single object, with a <code>basematerials</code> color per part. No libraries, nothing uploaded.</p>
     </div>
   </details>
@@ -191,8 +200,13 @@
           <div class="row" id="thresholdRow"><label for="threshold">Threshold</label><input type="range" id="threshold" min="1" max="254" value="128"><span class="val" id="thresholdVal"></span></div>
           <div class="row" id="artSlotRow"><label for="artSlot">Art color</label><select id="artSlot"><option value="1">Color 2</option><option value="2">Color 3</option><option value="3">Color 4</option></select></div>
           <div id="colorsControls" class="hidden" style="margin-bottom:0.55rem">
-            <div class="row"><label for="k">Image colors</label><input type="range" id="k" min="2" max="6" value="3"><span class="val" id="kVal"></span></div>
+            <div class="row"><label for="k">Detect colors</label><input type="range" id="k" min="4" max="16" value="12"><span class="val" id="kVal"></span></div>
+            <div class="cmap-row cmap-head"><span class="chip-h">Detected</span><span class="slots" id="mapHeads"><span>Base</span><span>2</span><span>3</span><span>4</span></span></div>
             <div id="clusterList"></div>
+            <div class="row" style="margin-top:0.5rem"><label for="autoN">Auto-group</label>
+              <select id="autoN"><option value="4">4 filaments</option><option value="3">3 filaments</option><option value="2">2 filaments</option></select>
+              <button type="button" id="autoApply" title="Re-run the automatic grouping, replacing manual choices">Reset</button>
+            </div>
             <div class="row"><button type="button" id="matchColors" style="flex:1">Use detected colors as filament colors</button></div>
           </div>
           <div class="row"><label for="blur">Smoothing</label><input type="range" id="blur" min="0" max="1.5" step="0.05" value="0.2"><span class="val" id="blurVal"></span></div>
@@ -260,6 +274,10 @@
       </div>
 
       <div class="preview-wrap">
+        <div class="seg hidden" id="viewSeg" style="margin-bottom:0.5rem">
+          <button type="button" id="viewFil" title="Show the patch in filament colors">Filament preview</button>
+          <button type="button" id="viewDet" title="Show the image reduced to the detected colors, before mapping to filaments">Detected colors</button>
+        </div>
         <canvas id="preview"></canvas>
         <div class="stats" id="stats"></div>
         <div class="row" style="margin-top:0.8rem"><label for="fname" style="flex:0 0 auto">File name</label><input type="text" id="fname" value="patch"></div>
@@ -455,101 +473,199 @@
 
     const currentSource = () => sourceMode === 'text' ? makeTextArt() : imageSource;
 
-    // ---------- Colour detection (k-means on a thumbnail of the source) ----------
+    // ---------- Colour detection ----------
+    // Stage 1 reduces the image to up to N representative colours with k-means in CIELAB, a
+    // colour space where straight-line distance (ΔE) tracks how different two colours look.
+    // Stage 2 maps each detected colour to one of the four filaments (auto-grouped, then editable).
+    const SRGB_LIN = new Float64Array(256).map((_, i) => { const c = i / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+    function rgbToLab(r, g, b) {
+      const R = SRGB_LIN[r], G = SRGB_LIN[g], B = SRGB_LIN[b];
+      const f = t => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116;
+      const fx = f((0.4124 * R + 0.3576 * G + 0.1805 * B) / 0.95047);
+      const fy = f(0.2126 * R + 0.7152 * G + 0.0722 * B);
+      const fz = f((0.0193 * R + 0.1192 * G + 0.9505 * B) / 1.08883);
+      return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
+    }
+    const labDist = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
+    function mulberry32(seed) {
+      return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+    }
+
     const thumbCanvas = document.createElement('canvas');
     const thumbCtx = thumbCanvas.getContext('2d', { willReadFrequently: true });
-    let palette = { key: '', clusters: [], map: [] };
+    let palette = { key: '', clusters: [], hasAlpha: false, map: [] };
+    let highlight = -1;            // detected colour highlighted in the preview
+    let previewMode = 'filaments'; // or 'detected'
 
-    function detectPalette(src, K) {
-      const sc = Math.min(1, 128 / Math.max(src.width, src.height));
+    // Detection reads the image at up to 512 px and first bins near-identical colours (6 bits per
+    // channel), so k-means runs on a few thousand weighted colours instead of every pixel. That
+    // keeps small features, such as a thin outline or a tiny accent, in the count without slowing it down.
+    function detectPalette(src, N) {
+      const sc = Math.min(1, 512 / Math.max(src.width, src.height));
       const w = Math.max(1, Math.round(src.width * sc)), h = Math.max(1, Math.round(src.height * sc));
       thumbCanvas.width = w; thumbCanvas.height = h;
       thumbCtx.clearRect(0, 0, w, h);
       thumbCtx.drawImage(src, 0, 0, w, h);
       const d = thumbCtx.getImageData(0, 0, w, h).data;
-      const px = [], border = [];
-      let transparent = 0;
+      const bins = new Map();
+      let transparent = 0, opaque = 0;
       for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
         const p = (y * w + x) * 4;
         if (d[p + 3] < 128) { transparent++; continue; }
-        px.push([d[p], d[p + 1], d[p + 2]]);
-        border.push(x === 0 || y === 0 || x === w - 1 || y === h - 1);
+        opaque++;
+        const key = (d[p] >> 2) << 12 | (d[p + 1] >> 2) << 6 | (d[p + 2] >> 2);
+        let b = bins.get(key);
+        if (!b) bins.set(key, b = { n: 0, r: 0, g: 0, b: 0, border: 0 });
+        b.n++; b.r += d[p]; b.g += d[p + 1]; b.b += d[p + 2];
+        if (x === 0 || y === 0 || x === w - 1 || y === h - 1) b.border++;
       }
-      if (!px.length) return { clusters: [], map: [] };
-      const dist = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
-      // deterministic max-min seeding, then Lloyd iterations
-      const mean = [0, 1, 2].map(c => px.reduce((n, q) => n + q[c], 0) / px.length);
-      const centers = [];
-      let far = 0;
-      px.forEach((q, i) => { if (dist(q, mean) > dist(px[far], mean)) far = i; });
-      centers.push(px[far].slice());
-      const minD = px.map(q => dist(q, centers[0]));
-      while (centers.length < K) {
-        let best = 0;
-        for (let i = 1; i < px.length; i++) if (minD[i] > minD[best]) best = i;
-        if (minD[best] < 1) break; // fewer distinct colours than K
-        centers.push(px[best].slice());
-        px.forEach((q, i) => { minD[i] = Math.min(minD[i], dist(q, centers[centers.length - 1])); });
-      }
-      const assign = new Int32Array(px.length);
-      for (let it = 0; it < 12; it++) {
-        const sum = centers.map(() => [0, 0, 0, 0]);
-        px.forEach((q, i) => {
-          let b = 0;
-          for (let c = 1; c < centers.length; c++) if (dist(q, centers[c]) < dist(q, centers[b])) b = c;
-          assign[i] = b; sum[b][0] += q[0]; sum[b][1] += q[1]; sum[b][2] += q[2]; sum[b][3]++;
-        });
-        sum.forEach((t, c) => { if (t[3]) centers[c] = [t[0] / t[3], t[1] / t[3], t[2] / t[3]]; });
-      }
-      const clusters = centers.map(rgb => ({ rgb, count: 0, border: 0 }));
-      assign.forEach((c, i) => { clusters[c].count++; if (border[i]) clusters[c].border++; });
-      const total = px.length + transparent;
-      const kept = clusters.filter(c => c.count).sort((a, b) => b.count - a.count);
-      kept.forEach(c => c.pct = c.count / total);
-      // Default mapping: an opaque background (the colour hugging the edges) stays flat as the
-      // base; every other colour is raised, largest first, into Color 2, 3, 4.
+      const total = opaque + transparent;
       const hasAlpha = transparent / total > 0.02;
-      let bg = -1;
-      if (!hasAlpha) kept.forEach((c, i) => { if (bg < 0 || c.border > kept[bg].border) bg = i; });
-      // Colours beyond the three raised slots (often anti-aliasing halos) join the closest
-      // colour that already has a slot.
-      let next = 1;
-      const map = kept.map((c, i) => i === bg ? 0 : next <= 3 ? next++ : -1);
-      map.forEach((m, i) => {
-        if (m >= 0) return;
-        let near = -1;
-        map.forEach((m2, j) => { if (m2 >= 0 && (near < 0 || dist(kept[i].rgb, kept[j].rgb) < dist(kept[i].rgb, kept[near].rgb))) near = j; });
-        map[i] = map[near];
+      if (!opaque) return { clusters: [], hasAlpha };
+      const pts = [...bins.values()].map(b => {
+        const rgb = [b.r / b.n, b.g / b.n, b.b / b.n];
+        return { rgb, lab: rgbToLab(...rgb.map(Math.round)), n: b.n, border: b.border };
       });
-      return { clusters: kept, map };
+
+      // weighted k-means++ seeding (fixed seed so the same image always gives the same palette)
+      const rand = mulberry32(12345);
+      const pick = wts => { let sum = 0; for (const v of wts) sum += v; let r = rand() * sum, i = 0; while (i < wts.length - 1 && (r -= wts[i]) > 0) i++; return i; };
+      const centers = [pts[pick(pts.map(q => q.n))].lab.slice()];
+      const minD = pts.map(q => labDist(q.lab, centers[0]));
+      while (centers.length < N) {
+        let sum = 0;
+        pts.forEach((q, i) => { sum += minD[i] * q.n; });
+        if (sum / opaque < 0.5) break; // the image has fewer distinct colours than N
+        const c = pts[pick(pts.map((q, i) => minD[i] * q.n))].lab.slice();
+        centers.push(c);
+        pts.forEach((q, i) => { minD[i] = Math.min(minD[i], labDist(q.lab, c)); });
+      }
+      const assign = new Int32Array(pts.length);
+      for (let it = 0; it < 20; it++) {
+        const acc = centers.map(() => [0, 0, 0, 0]);
+        pts.forEach((q, i) => {
+          let b = 0, bd = labDist(q.lab, centers[0]);
+          for (let c = 1; c < centers.length; c++) { const dd = labDist(q.lab, centers[c]); if (dd < bd) { bd = dd; b = c; } }
+          assign[i] = b;
+          acc[b][0] += q.lab[0] * q.n; acc[b][1] += q.lab[1] * q.n; acc[b][2] += q.lab[2] * q.n; acc[b][3] += q.n;
+        });
+        acc.forEach((t, c) => { if (t[3]) centers[c] = [t[0] / t[3], t[1] / t[3], t[2] / t[3]]; });
+      }
+      const clusters = centers.map(c => ({ lab: c, rgb: [0, 0, 0], count: 0, border: 0 }));
+      pts.forEach((q, i) => {
+        const k = clusters[assign[i]];
+        k.count += q.n; k.border += q.border;
+        k.rgb[0] += q.rgb[0] * q.n; k.rgb[1] += q.rgb[1] * q.n; k.rgb[2] += q.rgb[2] * q.n;
+      });
+      const kept = clusters.filter(c => c.count).sort((a, b) => b.count - a.count);
+      kept.forEach(c => { c.rgb = c.rgb.map(v => v / c.count); c.pct = c.count / total; });
+      return { clusters: kept, hasAlpha };
     }
 
-    function getPalette(src, K) {
-      const key = (sourceMode === 'text' ? 'text|' + $('text').value + '|' + $('font').value : 'img|' + imageId) + '|' + K;
+    // Group the detected colours into nFil filaments. First split background from artwork: with
+    // an opaque background, the colour hugging the image edges plus anything within ΔE 20 of it
+    // (anti-aliasing, paper texture) stays flat as the base. The remaining artwork colours are
+    // then grouped by weighted k-means in Lab into the raised filaments, largest group first
+    // as Color 2, 3, 4. With a transparent background the transparency is the base.
+    function autoAssign(pal, nFil) {
+      const cl = pal.clusters;
+      if (!cl.length) return [];
+      const map = new Array(cl.length).fill(0);
+      let fg = cl.map((_, i) => i);
+      if (!pal.hasAlpha) {
+        let bg = 0;
+        cl.forEach((c, i) => { if (c.border > cl[bg].border) bg = i; });
+        fg = fg.filter(i => labDist(cl[i].lab, cl[bg].lab) > 20 * 20);
+      }
+      if (!fg.length) return map;
+      const group = groupColors(fg.map(i => cl[i]), Math.min(3, nFil - 1));
+      const totals = [];
+      fg.forEach((ci, k) => { totals[group[k]] = (totals[group[k]] || 0) + cl[ci].count; });
+      const order = [...totals.keys()].filter(g => totals[g]).sort((a, b) => totals[b] - totals[a]);
+      fg.forEach((ci, k) => { map[ci] = order.indexOf(group[k]) + 1; });
+      return map;
+    }
+
+    function groupColors(cl, G) {
+      if (cl.length <= G) return cl.map((_, i) => i);
+      // seed with the largest colour, then repeatedly the colour farthest from every seed,
+      // weighted by size so a sliver of edge-blend colour doesn't claim a filament
+      const centers = [cl[0].lab.slice()];
+      while (centers.length < G) {
+        let best = -1, bs = -1;
+        cl.forEach((c, i) => {
+          const sc = Math.min(...centers.map(m => labDist(c.lab, m))) * Math.sqrt(c.count);
+          if (sc > bs) { bs = sc; best = i; }
+        });
+        centers.push(cl[best].lab.slice());
+      }
+      const group = new Array(cl.length).fill(0);
+      for (let it = 0; it < 20; it++) {
+        const acc = centers.map(() => [0, 0, 0, 0]);
+        cl.forEach((c, i) => {
+          let b = 0;
+          for (let g = 1; g < G; g++) if (labDist(c.lab, centers[g]) < labDist(c.lab, centers[b])) b = g;
+          group[i] = b;
+          acc[b][0] += c.lab[0] * c.count; acc[b][1] += c.lab[1] * c.count; acc[b][2] += c.lab[2] * c.count; acc[b][3] += c.count;
+        });
+        acc.forEach((t, g) => { if (t[3]) centers[g] = [t[0] / t[3], t[1] / t[3], t[2] / t[3]]; });
+      }
+      return group;
+    }
+
+    function getPalette(src, N) {
+      const key = (sourceMode === 'text' ? 'text|' + $('text').value + '|' + $('font').value : 'img|' + imageId) + '|' + N;
       if (palette.key !== key) {
-        palette = { key, ...detectPalette(src, K) };
+        palette = { key, ...detectPalette(src, N) };
+        palette.map = autoAssign(palette, +$('autoN').value);
+        highlight = -1;
         renderClusterList();
       }
       return palette;
     }
 
+    const textOn = hex => { const [r, g, b] = hexRgb(hex); return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? '#000' : '#fff'; };
+    const toHex = rgb => '#' + rgb.map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
+
     function renderClusterList() {
       const list = $('clusterList');
       list.innerHTML = '';
+      if (!palette.clusters.length) { list.innerHTML = '<div class="cmap-row muted">No opaque pixels found.</div>'; return; }
       palette.clusters.forEach((c, i) => {
         const row = document.createElement('div');
-        row.className = 'cluster';
-        const [r, g, b] = c.rgb.map(Math.round);
-        row.innerHTML = `<span class="chip" style="background:rgb(${r},${g},${b})"></span><span class="pct">${Math.round(c.pct * 100)}%</span>`;
-        const sel = document.createElement('select');
-        sel.setAttribute('aria-label', 'Filament for detected color ' + (i + 1));
-        SLOT_NAMES.forEach((n, v) => sel.add(new Option(v ? n + ' (raised)' : 'Base (flat, not raised)', v)));
-        sel.value = palette.map[i];
-        sel.onchange = () => { palette.map[i] = +sel.value; render(); };
-        row.appendChild(sel);
+        row.className = 'cmap-row';
+        row.innerHTML = `<span class="chip" title="${toHex(c.rgb)}" style="background:${toHex(c.rgb)}"></span>` +
+          `<span class="pct">${c.pct >= 0.01 ? Math.round(c.pct * 100) : '<1'}%</span><span class="slots"></span>`;
+        const slots = row.querySelector('.slots');
+        for (let v = 0; v < 4; v++) {
+          const b = document.createElement('button');
+          b.type = 'button'; b.className = 'slot'; b.dataset.slot = v;
+          b.textContent = v ? v + 1 : 'B';
+          b.title = `Print this color in ${SLOT_NAMES[v]}${v ? ' (raised)' : ' (flat)'}`;
+          b.setAttribute('aria-label', `Detected color ${i + 1}: ${SLOT_NAMES[v]}`);
+          b.onclick = () => { palette.map[i] = v; renderClusterList(); render(); };
+          slots.appendChild(b);
+        }
+        const hi = on => () => { highlight = on ? i : -1; if (state) drawPreview(state.s, state.G, state.design, state.clusterIdx); };
+        row.addEventListener('mouseenter', hi(true));
+        row.addEventListener('mouseleave', hi(false));
+        row.querySelector('.chip').onclick = () => { highlight = highlight === i ? -1 : i; if (state) drawPreview(state.s, state.G, state.design, state.clusterIdx); };
         list.appendChild(row);
       });
-      if (!palette.clusters.length) list.innerHTML = '<div class="cluster">No opaque pixels found.</div>';
+      paintSlotButtons();
+    }
+
+    // Tint the mapping buttons with the current filament colours and mark each row's choice.
+    function paintSlotButtons() {
+      const colors = [0, 1, 2, 3].map(i => $('color' + i).value);
+      document.querySelectorAll('#mapHeads span').forEach((h, v) => { h.style.background = colors[v]; h.style.color = textOn(colors[v]); });
+      document.querySelectorAll('#clusterList .cmap-row').forEach((row, i) => {
+        row.querySelectorAll('.slot').forEach(b => {
+          const v = +b.dataset.slot;
+          b.style.background = colors[v]; b.style.color = textOn(colors[v]);
+          b.classList.toggle('on', palette.map[i] === v);
+        });
+      });
     }
 
     // ---------- Rasterise + clean ----------
@@ -560,6 +676,7 @@
     function rasterise(s, G) {
       const { nx, ny, cx, cy, sdf } = G;
       const design = new Uint8Array(nx * ny);
+      const clusterIdx = new Int16Array(nx * ny).fill(-1); // detected colour per cell (colors mode)
       const inBase = -0.71 * Math.max(cx, cy);         // cell fully inside the outline
       const artEdge = inBase - s.rim - s.margin;       // art stays inside the border + gap
 
@@ -594,16 +711,22 @@
         const px = g.getImageData(0, 0, nx, ny).data;
         const pal = s.mode === 'colors' ? getPalette(src, s.k) : null;
         const t = s.threshold;
+        const nearest = new Map(); // packed RGB → detected colour index
         for (let n = 0, p = 0; n < nx * ny; n++, p += 4) {
           if (sdf[n] > artEdge) continue;
           if (px[p + 3] < 128) continue;
           if (pal) {
-            let best = -1, bd = Infinity;
-            pal.clusters.forEach((c, ci) => {
-              const d = (px[p] - c.rgb[0]) ** 2 + (px[p + 1] - c.rgb[1]) ** 2 + (px[p + 2] - c.rgb[2]) ** 2;
-              if (d < bd) { bd = d; best = ci; }
-            });
-            if (best >= 0) design[n] = pal.map[best];
+            if (!pal.clusters.length) continue;
+            const key = px[p] << 16 | px[p + 1] << 8 | px[p + 2];
+            let best = nearest.get(key);
+            if (best === undefined) {
+              const q = rgbToLab(px[p], px[p + 1], px[p + 2]);
+              let bd = Infinity;
+              pal.clusters.forEach((c, ci) => { const dd = labDist(q, c.lab); if (dd < bd) { bd = dd; best = ci; } });
+              nearest.set(key, best);
+            }
+            clusterIdx[n] = best;
+            design[n] = pal.map[best];
             continue;
           }
           if (s.mode === 'alpha') { design[n] = s.artSlot; continue; }
@@ -622,7 +745,7 @@
         }
       }
       fixDiagonals(design, nx, ny, sdf, inBase, s.stack === 'stacked');
-      return design;
+      return { design, clusterIdx };
     }
 
     // Merge every 4-connected region (of any label, including "nothing") smaller than
@@ -881,7 +1004,7 @@ ${objs}
 
     function hexRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
 
-    function drawPreview(s, G, design) {
+    function drawPreview(s, G, design, clusterIdx) {
       const dpr = window.devicePixelRatio || 1;
       const cssW = preview.clientWidth || 600;
       const pad = 28;
@@ -911,17 +1034,25 @@ ${objs}
       const { nx, ny } = G;
       cellCanvas.width = nx; cellCanvas.height = ny;
       const img = cellCtx.createImageData(nx, ny);
-      const draw = (inPart, rgb, dx, dy) => {
+      // colorOf(n) returns an [r,g,b] for cells to paint, or null to leave them clear
+      const paint = (colorOf, dx, dy) => {
         for (let n = 0, p = 0; n < nx * ny; n++, p += 4) {
-          img.data[p] = rgb[0]; img.data[p + 1] = rgb[1]; img.data[p + 2] = rgb[2]; img.data[p + 3] = inPart(design[n]) ? 255 : 0;
+          const c = colorOf(n);
+          if (c) { img.data[p] = c[0]; img.data[p + 1] = c[1]; img.data[p + 2] = c[2]; img.data[p + 3] = 255; }
+          else img.data[p + 3] = 0;
         }
         cellCtx.putImageData(img, 0, 0);
         g.imageSmoothingEnabled = k * G.cx < 2.5;
         g.drawImage(cellCanvas, ox - s.W / 2 * k + dx, oy - s.H / 2 * k + dy, s.W * k, s.H * k);
       };
+      const draw = (inPart, rgb, dx, dy) => paint(n => inPart(design[n]) ? rgb : null, dx, dy);
       const depth = Math.max(1, Math.min(3, s.relief * k * 0.12));
       const shadow = [0, 0, 0];
-      if (s.stack === 'stacked') {
+      const showDetected = s.mode === 'colors' && previewMode === 'detected' && palette.clusters.length;
+      if (showDetected) {
+        // stage-1 result: every cell in the colour it was reduced to, before filament mapping
+        paint(n => clusterIdx[n] >= 0 ? palette.clusters[clusterIdx[n]].rgb : null, 0, 0);
+      } else if (s.stack === 'stacked') {
         for (let slot = 1; slot <= 3; slot++) {
           const inPart = partMask(true, slot);
           draw(inPart, shadow, depth, depth);
@@ -930,6 +1061,15 @@ ${objs}
       } else {
         draw(v => v > 0, shadow, depth, depth);
         for (let slot = 1; slot <= 3; slot++) draw(partMask(false, slot), hexRgb(s.colors[slot]), 0, 0);
+      }
+
+      if (s.mode === 'colors' && highlight >= 0 && palette.clusters[highlight]) {
+        // dim everything, then show where the hovered detected colour sits, outlined in white
+        g.fillStyle = 'rgba(0,0,0,0.6)'; g.fill(path);
+        const mine = n => clusterIdx[n] === highlight;
+        const white = [255, 255, 255];
+        for (const [dx, dy] of [[-1.5, 0], [1.5, 0], [0, -1.5], [0, 1.5]]) paint(n => mine(n) ? white : null, dx, dy);
+        paint(n => mine(n) ? palette.clusters[highlight].rgb : null, 0, 0);
       }
 
       g.strokeStyle = 'rgba(255,255,255,0.15)'; g.lineWidth = 1; g.stroke(path);
@@ -1007,9 +1147,13 @@ ${objs}
         $('rimSlotRow').classList.toggle('hidden', !(s.rim > 0));
         $('reliefLabel').textContent = s.stack === 'stacked' ? 'Step per color' : 'Raised art';
         const G = gridFor(s);
-        const design = rasterise(s, G);
-        state = { s, G, design };
-        drawPreview(s, G, design);
+        const { design, clusterIdx } = rasterise(s, G);
+        state = { s, G, design, clusterIdx };
+        $('viewSeg').classList.toggle('hidden', s.mode !== 'colors');
+        $('viewFil').classList.toggle('active', previewMode === 'filaments');
+        $('viewDet').classList.toggle('active', previewMode === 'detected');
+        paintSlotButtons();
+        drawPreview(s, G, design, clusterIdx);
         updateStats(s, G, design);
       });
     }
@@ -1116,11 +1260,17 @@ ${objs}
     $('artCCW').onclick = () => turnArt(-1);
     $('artZero').onclick = () => { $('artRot').value = 0; render(); };
 
+    const regroup = () => { palette.map = autoAssign(palette, +$('autoN').value); renderClusterList(); render(); };
+    $('autoN').addEventListener('change', regroup);
+    $('autoApply').onclick = regroup;
+    $('viewFil').onclick = () => { previewMode = 'filaments'; render(); };
+    $('viewDet').onclick = () => { previewMode = 'detected'; render(); };
+
     $('matchColors').onclick = () => {
       for (let slot = 0; slot <= 3; slot++) {
         const i = palette.map.indexOf(slot); // clusters are sorted largest first
         if (i < 0) continue;
-        $('color' + slot).value = '#' + palette.clusters[i].rgb.map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
+        $('color' + slot).value = toHex(palette.clusters[i].rgb);
       }
       render();
     };
