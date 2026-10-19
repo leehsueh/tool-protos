@@ -1,0 +1,1625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Turn an image or upscaled sprite into editable pixel art — auto-detects the pixel grid, reduces colors, lets you repaint, and exports SVG or PNG.">
+  <meta name="date" content="2026-10-19">
+  <meta name="tags" content="image, pixel art, sprite, svg, png, editor">
+  <title>Image to Pixel Art</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+      padding: 1rem;
+    }
+
+    nav {
+      margin-bottom: 1rem;
+    }
+
+    nav a {
+      color: #58a6ff;
+      text-decoration: none;
+      font-size: 0.875rem;
+    }
+
+    nav a:hover { text-decoration: underline; }
+
+    /* --- Docs section --- */
+    details {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+      max-width: 800px;
+    }
+
+    summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: #8b949e;
+      font-size: 0.875rem;
+      user-select: none;
+      list-style: none;
+    }
+
+    summary::before {
+      content: '▶ ';
+      font-size: 0.7em;
+    }
+
+    details[open] summary::before { content: '▼ '; }
+
+    .docs {
+      margin-top: 1rem;
+      color: #8b949e;
+      font-size: 0.9rem;
+      line-height: 1.7;
+    }
+
+    .docs h2 {
+      color: #c9d1d9;
+      font-size: 0.875rem;
+      font-weight: 600;
+      margin: 1rem 0 0.25rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .docs h2:first-child { margin-top: 0; }
+
+    .docs p + p { margin-top: 0.5rem; }
+
+    .docs ul { margin: 0.25rem 0 0 1.25rem; }
+
+    .docs code {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 3px;
+      padding: 0.1em 0.35em;
+      font-family: monospace;
+      font-size: 0.85em;
+      color: #79c0ff;
+    }
+
+    /* --- Experiment area --- */
+    main {
+      max-width: 1280px;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #f0f6fc;
+      margin-bottom: 1.25rem;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+      gap: 1rem;
+      align-items: start;
+    }
+
+    @media (max-width: 860px) {
+      .layout { grid-template-columns: minmax(0, 1fr); }
+    }
+
+    .col { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 0.9rem 1rem;
+      min-width: 0;
+    }
+
+    .card h3 {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.6rem;
+      display: flex;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+
+    .card h3 .meta { text-transform: none; letter-spacing: 0; font-weight: 400; }
+
+    .row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+    .row + .row { margin-top: 0.55rem; }
+
+    .fields {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.5rem 0.75rem;
+    }
+
+    label.f {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      font-size: 0.75rem;
+      color: #8b949e;
+    }
+
+    label.chk {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.8rem;
+      color: #c9d1d9;
+      cursor: pointer;
+    }
+
+    input[type=number], select {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      color: #e6edf3;
+      border-radius: 6px;
+      padding: 0.3rem 0.45rem;
+      font-size: 0.85rem;
+      width: 100%;
+      min-width: 0;
+    }
+
+    input[type=range] { width: 100%; accent-color: #58a6ff; }
+
+    input[type=color] {
+      width: 2.2rem;
+      height: 2rem;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      background: #0d1117;
+      padding: 2px;
+      cursor: pointer;
+    }
+
+    button {
+      background: #21262d;
+      border: 1px solid #30363d;
+      color: #c9d1d9;
+      border-radius: 6px;
+      padding: 0.35rem 0.7rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    button:hover:not(:disabled) { background: #30363d; border-color: #8b949e; }
+    button:disabled { opacity: 0.45; cursor: default; }
+    button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+    button.primary:hover:not(:disabled) { background: #388bfd; border-color: #388bfd; }
+    button.on { background: #1f6feb33; border-color: #58a6ff; color: #f0f6fc; }
+
+    .drop {
+      border: 1.5px dashed #30363d;
+      border-radius: 8px;
+      padding: 1rem;
+      text-align: center;
+      color: #8b949e;
+      font-size: 0.85rem;
+      line-height: 1.5;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .drop:hover, body.dragging .drop { border-color: #58a6ff; background: #58a6ff11; }
+    .drop strong { color: #c9d1d9; }
+
+    .hint { font-size: 0.75rem; color: #8b949e; line-height: 1.5; }
+    .status { font-size: 0.8rem; color: #c9d1d9; line-height: 1.5; margin-top: 0.6rem; }
+    .status.warn { color: #d29922; }
+    .status.ok { color: #3fb950; }
+
+    .checker {
+      background-color: #2d333b;
+      background-image:
+        linear-gradient(45deg, #22272e 25%, transparent 25%, transparent 75%, #22272e 75%),
+        linear-gradient(45deg, #22272e 25%, transparent 25%, transparent 75%, #22272e 75%);
+      background-size: 16px 16px;
+      background-position: 0 0, 8px 8px;
+    }
+
+    .src-wrap {
+      margin-top: 0.75rem;
+      max-height: 460px;
+      overflow: auto;
+      border-radius: 6px;
+      border: 1px solid #30363d;
+      display: none;
+    }
+
+    .src-wrap canvas { display: block; }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      align-items: center;
+    }
+
+    .toolbar .sep { width: 1px; height: 1.6rem; background: #30363d; margin: 0 0.2rem; }
+
+    .tool { min-width: 2.2rem; }
+    .tool kbd { font-family: monospace; font-size: 0.7em; color: #8b949e; margin-left: 0.25rem; }
+
+    .editor-wrap {
+      margin-top: 0.75rem;
+      overflow: auto;
+      max-height: 72vh;
+      border-radius: 6px;
+      border: 1px solid #30363d;
+      background: #0d1117;
+      display: flex;
+      min-height: 240px;
+    }
+
+    #editor {
+      display: block;
+      margin: auto;
+      touch-action: none;
+      cursor: crosshair;
+      image-rendering: pixelated;
+    }
+
+    .empty {
+      margin: auto;
+      color: #8b949e;
+      font-size: 0.9rem;
+      padding: 2rem;
+      text-align: center;
+    }
+
+    .statusbar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 0.5rem;
+      font-size: 0.75rem;
+      color: #8b949e;
+      margin-top: 0.45rem;
+      font-family: ui-monospace, monospace;
+    }
+
+    .panels {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1rem;
+    }
+
+    .palette {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      max-height: 180px;
+      overflow: auto;
+      padding: 2px;
+    }
+
+    .sw {
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      border-radius: 4px;
+      border: 1px solid #0006;
+      box-shadow: inset 0 0 0 1px #ffffff1a;
+    }
+
+    .sw:hover:not(:disabled) { border-color: #fff; }
+    .sw.active { outline: 2px solid #58a6ff; outline-offset: 1px; }
+    .sw.brush::after {
+      content: '';
+      display: block;
+      width: 6px;
+      height: 6px;
+      margin: auto;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 0 0 1px #000;
+    }
+
+    body.merging .sw { cursor: copy; }
+
+    .active-panel {
+      margin-top: 0.75rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid #30363d;
+    }
+
+    .mono { font-family: ui-monospace, monospace; font-size: 0.8rem; }
+    .grow { flex: 1; }
+  </style>
+</head>
+<body>
+  <nav><a href="../index.html">← Back to experiments</a></nav>
+
+  <details>
+    <summary>How this works</summary>
+    <div class="docs">
+      <h2>About</h2>
+      <p>Converts any image into a real grid of pixels you can edit and export. It is built for the common
+        case of a sprite that has been upscaled, re-saved as JPEG, or resized by a non-integer amount: it
+        finds the original pixel grid and recovers one clean color per source pixel. Ordinary photos can be
+        pixelized too by picking how many pixels wide the result should be.</p>
+
+      <h2>How to use</h2>
+      <ul>
+        <li><strong>Import</strong> — drop, paste (<code>Ctrl/⌘+V</code>) or pick an image, or try the sample sprite.
+          The detected grid is drawn over the source preview; zoom in to check it lines up.</li>
+        <li><strong>Grid</strong> — tweak cell size / offset if detection is off, or set <em>Pixels across</em> to
+          pixelize a photo. Use <em>Center median</em> sampling for sprites and <em>Cell average</em> for photos.
+          Changing the grid re-samples the image (undoable).</li>
+        <li><strong>Edit</strong> — Pencil <code>B</code>, Eraser <code>E</code>, Fill <code>G</code>,
+          Replace color <code>R</code> (all pixels of the clicked color), Eyedropper <code>I</code>.
+          Right-click paints transparent with any tool; <code>Alt</code>+click picks a color.
+          Undo <code>Ctrl/⌘+Z</code>, redo <code>Ctrl/⌘+Shift+Z</code> or <code>Ctrl+Y</code>.
+          <code>Ctrl</code>+wheel zooms.</li>
+        <li><strong>Palette</strong> — click a swatch to select it and make it the brush color. Then recolor every
+          pixel of that color, make it transparent, merge it into another swatch, or highlight where it is used.</li>
+        <li><strong>Reduce colors</strong> — drag the slider to merge the palette down to N colors (live preview,
+          one undo step).</li>
+        <li><strong>Export</strong> — PNG at any integer scale, or SVG with one path per color.</li>
+      </ul>
+
+      <h2>Technical details</h2>
+      <p><strong>Grid detection.</strong> For each column boundary the tool sums color differences between
+        neighboring source columns (and the same for rows), giving an "edge energy" profile. Pixel-cell edges
+        repeat with period <code>p</code>, so it evaluates the Fourier coefficient
+        <code>Σ E[x]·e<sup>−2πix/p</sup></code> for a fine sweep of fractional periods. The normalized magnitude
+        measures how well edges line up on a grid of that size, and the phase gives the grid offset.
+        Divisors of the true size (<code>p/2</code>, <code>p/3</code>…) also score highly, while multiples cancel
+        out, so the largest strongly-scoring period is chosen and then refined per axis — this handles cell
+        sizes like 7.37px from non-integer resizes.</p>
+      <p><strong>Sampling.</strong> Each cell takes the per-channel median of its central ~60%, which ignores
+        blurred/JPEG-damaged borders. Cells that are mostly transparent become transparent. Near-duplicate
+        colors (compression noise) are then merged in OKLab space using a spatial hash.</p>
+      <p><strong>Color reduction</strong> is weighted k-means in OKLab with farthest-point seeding (deterministic).
+        With <em>Keep original colors</em> each cluster snaps to its real member nearest the centroid, so
+        hand-picked sprite colors are preserved instead of averaged into mud.</p>
+      <p><strong>SVG export</strong> merges horizontal runs of equal color, extends them downward while the
+        run below matches, and writes one <code>&lt;path&gt;</code> per color with
+        <code>shape-rendering="crispEdges"</code>, so it stays small and each color is easy to edit.</p>
+    </div>
+  </details>
+
+  <main>
+    <h1>Image to Pixel Art</h1>
+
+    <div class="layout">
+      <!-- ============ LEFT: import + grid ============ -->
+      <div class="col">
+        <section class="card">
+          <h3>Import</h3>
+          <div class="drop" id="drop">
+            <strong>Drop an image</strong>, paste, or click to choose<br>
+            <span class="hint">PNG, JPG, GIF, WebP…</span>
+          </div>
+          <input type="file" id="file" accept="image/*" hidden>
+          <div class="row" style="margin-top:0.6rem">
+            <button id="sampleBtn">Load sample sprite</button>
+            <button id="blankBtn">New blank 32×32</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h3>Grid <span class="meta" id="gridDims"></span></h3>
+          <div class="fields">
+            <label class="f">Cell width (px)<input type="number" id="cw" min="1" step="0.01" value="1"></label>
+            <label class="f">Cell height (px)<input type="number" id="ch" min="1" step="0.01" value="1"></label>
+            <label class="f">Offset X (px)<input type="number" id="ox" step="0.01" value="0"></label>
+            <label class="f">Offset Y (px)<input type="number" id="oy" step="0.01" value="0"></label>
+            <label class="f">Pixels across<input type="number" id="across" min="1" max="1024" step="1"></label>
+            <label class="f">Sampling
+              <select id="sampling">
+                <option value="median">Center median (sprites)</option>
+                <option value="average">Cell average (photos)</option>
+              </select>
+            </label>
+          </div>
+          <div class="row">
+            <label class="chk"><input type="checkbox" id="square" checked> Square cells</label>
+            <span class="grow"></span>
+            <button id="detectBtn" disabled>Auto-detect</button>
+          </div>
+          <div class="row" style="margin-top:0.75rem">
+            <label class="f grow">Merge near-duplicate colors: <span id="tolVal"></span>
+              <input type="range" id="tol" min="0" max="0.15" step="0.005" value="0.05">
+            </label>
+          </div>
+          <div class="status" id="detectStatus">Load an image to begin.</div>
+          <div class="row" style="margin-top:0.6rem">
+            <label class="chk"><input type="checkbox" id="showSrcGrid" checked> Show grid</label>
+            <span class="grow"></span>
+            <label class="hint" for="srcZoom">Preview</label>
+            <select id="srcZoom" style="width:auto">
+              <option value="fit">Fit</option>
+              <option value="1">1×</option>
+              <option value="2">2×</option>
+              <option value="4">4×</option>
+              <option value="8">8×</option>
+            </select>
+          </div>
+          <div class="src-wrap checker" id="srcWrap"><canvas id="srcCanvas"></canvas></div>
+        </section>
+      </div>
+
+      <!-- ============ RIGHT: editor ============ -->
+      <div class="col">
+        <section class="card">
+          <div class="toolbar">
+            <button class="tool on" data-tool="pencil" title="Pencil (B)">✏️<kbd>B</kbd></button>
+            <button class="tool" data-tool="eraser" title="Eraser (E)">🧽<kbd>E</kbd></button>
+            <button class="tool" data-tool="fill" title="Fill contiguous (G)">🪣<kbd>G</kbd></button>
+            <button class="tool" data-tool="replace" title="Replace color everywhere (R)">🔁<kbd>R</kbd></button>
+            <button class="tool" data-tool="picker" title="Eyedropper (I)">💧<kbd>I</kbd></button>
+            <span class="sep"></span>
+            <input type="color" id="brushColor" value="#000000" title="Brush color">
+            <span class="sep"></span>
+            <button id="undoBtn" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
+            <button id="redoBtn" title="Redo (Ctrl+Shift+Z)" disabled>↷ Redo</button>
+            <span class="sep"></span>
+            <button id="zoomOut" title="Zoom out">−</button>
+            <button id="zoomFit" title="Fit to view">Fit</button>
+            <button id="zoomIn" title="Zoom in">+</button>
+            <label class="chk"><input type="checkbox" id="showGrid" checked> Grid</label>
+          </div>
+          <div class="editor-wrap checker" id="editorWrap">
+            <div class="empty" id="emptyMsg">Your pixel art will appear here.</div>
+            <canvas id="editor" hidden></canvas>
+          </div>
+          <div class="statusbar">
+            <span id="sbInfo">—</span>
+            <span id="sbHover"></span>
+          </div>
+        </section>
+
+        <div class="panels">
+          <section class="card">
+            <h3>Palette <span class="meta" id="palCount"></span></h3>
+            <div class="palette" id="palette"></div>
+            <div class="active-panel" id="activePanel" hidden>
+              <div class="row">
+                <input type="color" id="activeColor" title="Recolor every pixel of this color">
+                <span class="mono" id="activeHex"></span>
+                <span class="hint" id="activeCount"></span>
+              </div>
+              <div class="row">
+                <button id="mergeBtn" title="Then click the swatch to merge into">Merge into…</button>
+                <button id="toBrushBtn">Replace with brush</button>
+                <button id="clearColorBtn">Make transparent</button>
+              </div>
+              <div class="row">
+                <label class="chk"><input type="checkbox" id="highlight"> Highlight where used</label>
+              </div>
+              <p class="hint" style="margin-top:0.4rem">Use the color box above to recolor all pixels of this color at once.</p>
+            </div>
+          </section>
+
+          <section class="card">
+            <h3>Reduce colors <span class="meta" id="kVal"></span></h3>
+            <input type="range" id="kSlider" min="2" max="64" step="1" value="16" disabled>
+            <div class="row">
+              <label class="chk"><input type="checkbox" id="keepOrig" checked> Keep original colors</label>
+            </div>
+            <p class="hint" style="margin-top:0.5rem">Drag to preview; the result is one undo step.
+              Keep original colors snaps each group to a color that already exists in the image.</p>
+          </section>
+
+          <section class="card">
+            <h3>Export <span class="meta" id="exportDims"></span></h3>
+            <div class="row">
+              <label class="f" style="width:6rem">Scale ×<input type="number" id="scale" min="1" max="128" step="1" value="10"></label>
+            </div>
+            <div class="row">
+              <button class="primary" id="pngBtn" disabled>Download PNG</button>
+              <button class="primary" id="svgBtn" disabled>Download SVG</button>
+              <button id="copySvgBtn" disabled>Copy SVG</button>
+            </div>
+            <p class="hint" style="margin-top:0.5rem">SVG uses a viewBox in pixel units, so it scales cleanly;
+              the scale only sets its default width/height.</p>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    'use strict';
+    const $ = id => document.getElementById(id);
+
+    // ---------------------------------------------------------------
+    // Color helpers. Pixels are packed like a little-endian ImageData
+    // Uint32 view: 0xAABBGGRR. Transparent is always exactly 0.
+    // ---------------------------------------------------------------
+    const pack = (r, g, b) => ((255 << 24) | (b << 16) | (g << 8) | r) >>> 0;
+    const R = v => v & 255, G = v => (v >>> 8) & 255, B = v => (v >>> 16) & 255;
+    const hex = v => '#' + [R(v), G(v), B(v)].map(c => c.toString(16).padStart(2, '0')).join('');
+    const fromHex = h => pack(parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16));
+
+    const LIN = new Float64Array(256);
+    for (let i = 0; i < 256; i++) {
+      const c = i / 255;
+      LIN[i] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    }
+
+    function toLab(v) {
+      const r = LIN[R(v)], g = LIN[G(v)], b = LIN[B(v)];
+      const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+      const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+      const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+      return [
+        0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+        1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+        0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s,
+      ];
+    }
+
+    function fromLab(L, A, Bb) {
+      const l = (L + 0.3963377774 * A + 0.2158037573 * Bb) ** 3;
+      const m = (L - 0.1055613458 * A - 0.0638541728 * Bb) ** 3;
+      const s = (L - 0.0894841775 * A - 1.2914855480 * Bb) ** 3;
+      const enc = c => {
+        c = c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(Math.max(c, 0), 1 / 2.4) - 0.055;
+        return Math.max(0, Math.min(255, Math.round(c * 255)));
+      };
+      return pack(
+        enc(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+        enc(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+        enc(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s),
+      );
+    }
+
+    const dist2 = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
+
+    function colorCounts(arr) {
+      const m = new Map();
+      for (let i = 0; i < arr.length; i++) {
+        const v = arr[i];
+        if (v) m.set(v, (m.get(v) || 0) + 1);
+      }
+      return m;
+    }
+
+    function applyMap(arr, map) {
+      for (let i = 0; i < arr.length; i++) {
+        const v = arr[i];
+        if (v) { const t = map.get(v); if (t !== undefined) arr[i] = t; }
+      }
+    }
+
+    // ---------------------------------------------------------------
+    // State
+    // ---------------------------------------------------------------
+    let srcData = null, srcCanvas = null, srcName = 'pixel-art';
+    let W = 0, H = 0, px = null;              // pixel art
+    let undoStack = [], redoStack = [];
+    let tool = 'pencil', brush = pack(0, 0, 0);
+    let activeColor = null, merging = false;
+    let zoom = 8, hover = null, drawing = null;
+    let reduceBase = null;                    // snapshot the color-reduce slider works from
+    let recolorIdx = null;                    // pixel indices being live-recolored
+
+    // ---------------------------------------------------------------
+    // Grid detection
+    // ---------------------------------------------------------------
+    function edgeProfiles(img) {
+      const { width: w, height: h, data: d } = img;
+      const ex = new Float64Array(w), ey = new Float64Array(h);
+      const T = 24; // ignore small differences (noise, gradients)
+      const diff = (i, j) => {
+        if (d[i + 3] === 0 && d[j + 3] === 0) return 0;
+        const s = Math.abs(d[i] - d[j]) + Math.abs(d[i + 1] - d[j + 1]) +
+                  Math.abs(d[i + 2] - d[j + 2]) + Math.abs(d[i + 3] - d[j + 3]);
+        return s > T ? s - T : 0;
+      };
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const i = (y * w + x) * 4;
+          if (x > 0) ex[x] += diff(i, i - 4);
+          if (y > 0) ey[y] += diff(i, i - 4 * w);
+        }
+      }
+      return { ex, ey };
+    }
+
+    function sparse(E) {
+      const idx = [], val = [];
+      let tot = 0;
+      for (let i = 0; i < E.length; i++) if (E[i] > 0) { idx.push(i); val.push(E[i]); tot += E[i]; }
+      return { idx: Int32Array.from(idx), val: Float64Array.from(val), tot };
+    }
+
+    // Normalized Fourier coefficient of the edge profile at period p.
+    function periodScore(P, p) {
+      if (!P.tot) return { s: 0, phase: 0 };
+      const k = 2 * Math.PI / p, { idx, val } = P;
+      let re = 0, im = 0;
+      for (let j = 0; j < idx.length; j++) {
+        const a = k * idx[j];
+        re += val[j] * Math.cos(a);
+        im -= val[j] * Math.sin(a);
+      }
+      return { s: Math.hypot(re, im) / P.tot, phase: Math.atan2(im, re) };
+    }
+
+    const offsetFromPhase = (phase, p) => (((-phase / (2 * Math.PI)) * p) % p + p) % p;
+
+    function detectGrid(img) {
+      const { ex, ey } = edgeProfiles(img);
+      const PX = sparse(ex), PY = sparse(ey);
+      if (!PX.tot && !PY.tot) return null;
+      const N = Math.max(img.width, img.height);
+      const pMax = Math.min(256, Math.max(2.5, Math.min(img.width, img.height) / 4));
+
+      const combined = p => {
+        const sx = periodScore(PX, p).s, sy = periodScore(PY, p).s;
+        if (!PX.tot) return sy;
+        if (!PY.tot) return sx;
+        return Math.sqrt(sx * sy);
+      };
+
+      // Sweep fractional periods; step keeps the phase drift across the image under 1/4 cycle.
+      const ps = [], sc = [];
+      for (let p = 2; p <= pMax; p += Math.max(0.0005, p * p / (4 * N))) {
+        ps.push(p);
+        sc.push(combined(p));
+      }
+      let max = 0;
+      for (const s of sc) max = Math.max(max, s);
+      if (max < 0.3) return null;
+
+      // Divisors of the true period score as high as the period itself; multiples cancel.
+      // So take the largest local maximum that is close to the best score.
+      let best = -1;
+      for (let i = 0; i < sc.length; i++) {
+        const isPeak = (i === 0 || sc[i] >= sc[i - 1]) && (i === sc.length - 1 || sc[i] >= sc[i + 1]);
+        if (isPeak && sc[i] >= 0.8 * max) best = i;
+      }
+      let p = ps[best];
+
+      // Refine jointly, then per axis (handles slightly non-square scaling).
+      const refine = (f, center, span, steps) => {
+        let bp = center, bs = -1;
+        for (let i = 0; i <= steps; i++) {
+          const q = center * (1 - span + 2 * span * i / steps);
+          const s = f(q);
+          if (s > bs) { bs = s; bp = q; }
+        }
+        return { p: bp, s: bs };
+      };
+      const joint = refine(combined, p, 0.02, 200);
+      p = joint.p;
+      const axis = P => {
+        if (!P.tot) return { p, s: 0 };
+        const r = refine(q => periodScore(P, q).s, p, 0.015, 150);
+        return r.s >= 0.3 ? r : { p, s: r.s };
+      };
+      const ax = axis(PX), ay = axis(PY);
+      const cw = ax.p, ch = ay.p;
+      return {
+        cw, ch,
+        ox: offsetFromPhase(periodScore(PX, cw).phase, cw),
+        oy: offsetFromPhase(periodScore(PY, ch).phase, ch),
+        conf: joint.s,
+      };
+    }
+
+    // ---------------------------------------------------------------
+    // Sampling the source into pixel cells
+    // ---------------------------------------------------------------
+    function axisLayout(N, p, o) {
+      o = ((o % p) + p) % p;
+      const start = o >= p / 2 ? o - p : o; // include a leading partial cell only if ≥ half visible
+      const n = Math.max(1, Math.floor((N - start - p / 2) / p) + 1);
+      return { start, n };
+    }
+
+    function getGrid() {
+      return {
+        cw: Math.max(1, +$('cw').value || 1),
+        ch: Math.max(1, +$('ch').value || 1),
+        ox: +$('ox').value || 0,
+        oy: +$('oy').value || 0,
+      };
+    }
+
+    const MAX_CELLS = 1024;
+
+    function sampleImage() {
+      const g = getGrid(), sw = srcData.width, sh = srcData.height, d = srcData.data;
+      const lx = axisLayout(sw, g.cw, g.ox), ly = axisLayout(sh, g.ch, g.oy);
+      const w = Math.min(MAX_CELLS, lx.n), h = Math.min(MAX_CELLS, ly.n);
+      const out = new Uint32Array(w * h);
+      const median = $('sampling').value === 'median';
+      const hr = new Uint32Array(256), hg = new Uint32Array(256), hb = new Uint32Array(256);
+      const clampX = v => Math.max(0, Math.min(sw - 1, v)), clampY = v => Math.max(0, Math.min(sh - 1, v));
+
+      const range = (start, p, k, clamp) => {
+        if (median) {
+          const c = start + (k + 0.5) * p, r = Math.max(0.5, p * 0.3);
+          const a = clamp(Math.floor(c - r)), b = clamp(Math.ceil(c + r) - 1);
+          return [a, Math.max(a, b)];
+        }
+        const a = clamp(Math.round(start + k * p)), b = clamp(Math.round(start + (k + 1) * p) - 1);
+        return [a, Math.max(a, b)];
+      };
+
+      for (let gy = 0; gy < h; gy++) {
+        const [y0, y1] = range(ly.start, g.ch, gy, clampY);
+        for (let gx = 0; gx < w; gx++) {
+          const [x0, x1] = range(lx.start, g.cw, gx, clampX);
+          let total = 0, opaque = 0, sr = 0, sg = 0, sb = 0;
+          if (median) { hr.fill(0); hg.fill(0); hb.fill(0); }
+          for (let y = y0; y <= y1; y++) {
+            for (let x = x0; x <= x1; x++) {
+              const i = (y * sw + x) * 4;
+              total++;
+              if (d[i + 3] < 128) continue;
+              opaque++;
+              if (median) { hr[d[i]]++; hg[d[i + 1]]++; hb[d[i + 2]]++; }
+              else { sr += d[i]; sg += d[i + 1]; sb += d[i + 2]; }
+            }
+          }
+          if (opaque * 2 < total || !opaque) continue; // mostly transparent → 0
+          let v;
+          if (median) {
+            const half = opaque / 2;
+            const med = hist => { let acc = 0; for (let c = 0; c < 256; c++) { acc += hist[c]; if (acc >= half) return c; } return 255; };
+            v = pack(med(hr), med(hg), med(hb));
+          } else {
+            v = pack(Math.round(sr / opaque), Math.round(sg / opaque), Math.round(sb / opaque));
+          }
+          out[gy * w + gx] = v;
+        }
+      }
+      return { w, h, out, truncated: w < lx.n || h < ly.n };
+    }
+
+    // Greedy merge of colors within `tol` (OKLab distance) of a more frequent color.
+    function mergeSimilar(arr, tol) {
+      if (tol <= 0) return;
+      const counts = [...colorCounts(arr)].sort((a, b) => b[1] - a[1]);
+      const buckets = new Map(), map = new Map(), t2 = tol * tol;
+      const key = (a, b, c) => a + ',' + b + ',' + c;
+      for (const [v] of counts) {
+        const lab = toLab(v);
+        const bx = Math.floor(lab[0] / tol), by = Math.floor(lab[1] / tol), bz = Math.floor(lab[2] / tol);
+        let found = null, fd = t2;
+        for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) {
+          const list = buckets.get(key(bx + i, by + j, bz + k));
+          if (!list) continue;
+          for (const rep of list) {
+            const dd = dist2(lab, rep.lab);
+            if (dd < fd) { fd = dd; found = rep; }
+          }
+        }
+        if (found) { map.set(v, found.v); continue; }
+        const k0 = key(bx, by, bz);
+        if (!buckets.has(k0)) buckets.set(k0, []);
+        buckets.get(k0).push({ v, lab });
+      }
+      applyMap(arr, map);
+    }
+
+    // ---------------------------------------------------------------
+    // Color reduction (weighted k-means in OKLab)
+    // ---------------------------------------------------------------
+    function reduceColors(src, K, keepOriginal) {
+      const out = src.slice();
+      const counts = [...colorCounts(src)];
+      const n = counts.length;
+      if (n <= K) return out;
+
+      const cols = counts.map(c => c[0]);
+      const labs = cols.map(toLab);
+      const wts = counts.map(c => c[1]);
+
+      // To keep the slider responsive on photos, cluster 5-bit buckets when there are many colors.
+      let pts = labs, pw = wts;
+      if (n > 4000) {
+        const bm = new Map();
+        for (let i = 0; i < n; i++) {
+          const v = cols[i], k = ((R(v) >> 3) << 10) | ((G(v) >> 3) << 5) | (B(v) >> 3);
+          let e = bm.get(k);
+          if (!e) bm.set(k, e = { l: [0, 0, 0], w: 0 });
+          e.l[0] += labs[i][0] * wts[i]; e.l[1] += labs[i][1] * wts[i]; e.l[2] += labs[i][2] * wts[i]; e.w += wts[i];
+        }
+        pts = []; pw = [];
+        for (const e of bm.values()) { pts.push(e.l.map(x => x / e.w)); pw.push(e.w); }
+      }
+      const m = pts.length;
+      K = Math.min(K, m);
+
+      // Deterministic farthest-point seeding, weighted by pixel count.
+      let first = 0;
+      for (let i = 1; i < m; i++) if (pw[i] > pw[first]) first = i;
+      const centers = [pts[first].slice()];
+      const dmin = new Float64Array(m).fill(Infinity);
+      while (centers.length < K) {
+        const c = centers[centers.length - 1];
+        let bi = 0, bs = -1;
+        for (let i = 0; i < m; i++) {
+          dmin[i] = Math.min(dmin[i], dist2(pts[i], c));
+          const s = dmin[i] * pw[i];
+          if (s > bs) { bs = s; bi = i; }
+        }
+        centers.push(pts[bi].slice());
+      }
+
+      const nearest = p => {
+        let bi = 0, bd = Infinity;
+        for (let k = 0; k < centers.length; k++) {
+          const dd = dist2(p, centers[k]);
+          if (dd < bd) { bd = dd; bi = k; }
+        }
+        return bi;
+      };
+
+      const assign = new Int32Array(m).fill(-1);
+      for (let iter = 0; iter < 24; iter++) {
+        let changed = 0;
+        for (let i = 0; i < m; i++) {
+          const a = nearest(pts[i]);
+          if (a !== assign[i]) { assign[i] = a; changed++; }
+        }
+        const sum = centers.map(() => [0, 0, 0, 0]);
+        for (let i = 0; i < m; i++) {
+          const s = sum[assign[i]], w = pw[i];
+          s[0] += pts[i][0] * w; s[1] += pts[i][1] * w; s[2] += pts[i][2] * w; s[3] += w;
+        }
+        sum.forEach((s, k) => { if (s[3]) centers[k] = [s[0] / s[3], s[1] / s[3], s[2] / s[3]]; });
+        if (!changed) break;
+      }
+
+      // Map every real color to its cluster's output color.
+      const clusterOf = labs.map(nearest);
+      const outColor = centers.map(c => fromLab(c[0], c[1], c[2]));
+      if (keepOriginal) {
+        const bestD = centers.map(() => Infinity);
+        for (let i = 0; i < n; i++) {
+          const k = clusterOf[i], dd = dist2(labs[i], centers[k]);
+          if (dd < bestD[k]) { bestD[k] = dd; outColor[k] = cols[i]; }
+        }
+      }
+      const map = new Map();
+      for (let i = 0; i < n; i++) map.set(cols[i], outColor[clusterOf[i]]);
+      applyMap(out, map);
+      return out;
+    }
+
+    // ---------------------------------------------------------------
+    // Undo / redo
+    // ---------------------------------------------------------------
+    function pushUndo() {
+      if (!px) return;
+      undoStack.push({ W, H, px: px.slice() });
+      if (undoStack.length > 100) undoStack.shift();
+      redoStack = [];
+      updateUndoButtons();
+    }
+
+    // Start a normal edit: ends any live color-reduce preview.
+    function beginEdit() {
+      reduceBase = null;
+      pushUndo();
+    }
+
+    function restore(from, to) {
+      if (!from.length) return;
+      to.push({ W, H, px: px.slice() });
+      const s = from.pop();
+      const resized = s.W !== W || s.H !== H;
+      W = s.W; H = s.H; px = s.px;
+      reduceBase = null;
+      if (resized) fitZoom();
+      afterChange();
+    }
+
+    function updateUndoButtons() {
+      $('undoBtn').disabled = !undoStack.length;
+      $('redoBtn').disabled = !redoStack.length;
+    }
+
+    // ---------------------------------------------------------------
+    // Loading images
+    // ---------------------------------------------------------------
+    function loadFile(file) {
+      if (!file || !file.type.startsWith('image/')) return;
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { setSource(img, file.name); URL.revokeObjectURL(url); };
+      img.onerror = () => { setStatus('Could not read that image.', 'warn'); URL.revokeObjectURL(url); };
+      img.src = url;
+    }
+
+    function setSource(img, name) {
+      srcCanvas = document.createElement('canvas');
+      srcCanvas.width = img.naturalWidth || img.width;
+      srcCanvas.height = img.naturalHeight || img.height;
+      const c = srcCanvas.getContext('2d', { willReadFrequently: true });
+      c.drawImage(img, 0, 0);
+      srcData = c.getImageData(0, 0, srcCanvas.width, srcCanvas.height);
+      srcName = (name || 'pixel-art').replace(/\.[^.]+$/, '') || 'pixel-art';
+      undoStack = []; redoStack = [];
+      $('detectBtn').disabled = false;
+      $('srcWrap').style.display = 'block';
+      runDetect(true);
+    }
+
+    function setStatus(msg, cls) {
+      const el = $('detectStatus');
+      el.textContent = msg;
+      el.className = 'status' + (cls ? ' ' + cls : '');
+    }
+
+    function setGridInputs(g) {
+      $('cw').value = +g.cw.toFixed(3);
+      $('ch').value = +g.ch.toFixed(3);
+      $('ox').value = +g.ox.toFixed(2);
+      $('oy').value = +g.oy.toFixed(2);
+      $('square').checked = Math.abs(g.cw - g.ch) <= 0.01 * g.cw;
+    }
+
+    function runDetect(fresh) {
+      setStatus('Detecting pixel grid…');
+      setTimeout(() => {
+        const sw = srcData.width, sh = srcData.height;
+        const t0 = performance.now();
+        const r = detectGrid(srcData);
+        const ms = Math.round(performance.now() - t0);
+        if (r && r.conf >= 0.35) {
+          setGridInputs(r);
+          $('sampling').value = 'median';
+          setStatus(`Detected ${r.cw.toFixed(2)} × ${r.ch.toFixed(2)} px cells · confidence ${Math.round(r.conf * 100)}% (${ms} ms)`, 'ok');
+        } else if (Math.max(sw, sh) <= 256) {
+          setGridInputs({ cw: 1, ch: 1, ox: 0, oy: 0 });
+          $('sampling').value = 'median';
+          setStatus('No upscaled grid found — treating each source pixel as one pixel. Set "Pixels across" to pixelize instead.', 'warn');
+        } else {
+          const cw = sw / 64;
+          setGridInputs({ cw, ch: cw, ox: 0, oy: 0 });
+          $('sampling').value = 'average';
+          setStatus('No pixel grid found (looks like a regular image) — pixelizing to 64 pixels across. Adjust "Pixels across" as needed.', 'warn');
+        }
+        resample(fresh);
+      }, 20);
+    }
+
+    function resample(fresh) {
+      if (!srcData) return;
+      if (!fresh) beginEdit(); else reduceBase = null;
+      const { w, h, out, truncated } = sampleImage();
+      mergeSimilar(out, +$('tol').value);
+      const resized = w !== W || h !== H;
+      W = w; H = h; px = out;
+      activeColor = null;
+      if (resized || fresh) fitZoom();
+      afterChange();
+      drawSource();
+      if (truncated) setStatus(`Grid capped at ${MAX_CELLS} cells per side — increase the cell size.`, 'warn');
+    }
+
+    let resampleTimer = 0;
+    function scheduleResample() {
+      clearTimeout(resampleTimer);
+      resampleTimer = setTimeout(() => resample(false), 180);
+    }
+
+    function newBlank(w, h) {
+      if (px) beginEdit();
+      W = w; H = h; px = new Uint32Array(w * h);
+      activeColor = null;
+      fitZoom();
+      afterChange();
+    }
+
+    // Procedural sample: a 16×16 sprite, nearest-upscaled by a non-integer factor, offset, then JPEG'd.
+    function loadSample() {
+      const art = [
+        '................',
+        '.....KKKKKK.....',
+        '...KKRRWWRRKK...',
+        '..KRRRWWWWRRRK..',
+        '.KWRRRRWWRRRRWK.',
+        '.KWWRRRRRRRRWWK.',
+        'KWWWRRWWWWRRWWWK',
+        'KWWRRWWWWWWRRWWK',
+        'KRRRRWWWWWWRRRRK',
+        'KRRRRRWWWWRRRRRK',
+        '.KKRRRRRRRRRRKK.',
+        '...KKSSSSSSKK...',
+        '...KSSKSSKSSK...',
+        '...KSSKSSKSSK...',
+        '...KSSSSSSSSK...',
+        '....KKKKKKKK....',
+      ];
+      const pal = { '.': '#7ec8e3', K: '#1a1220', R: '#d8343a', W: '#f6f0e8', S: '#f2c9a0' };
+      const small = document.createElement('canvas');
+      small.width = small.height = 16;
+      const sc = small.getContext('2d');
+      art.forEach((row, y) => [...row].forEach((ch, x) => { sc.fillStyle = pal[ch]; sc.fillRect(x, y, 1, 1); }));
+      const scale = 7.37, pad = 9;
+      const big = document.createElement('canvas');
+      big.width = Math.round(16 * scale + pad * 2);
+      big.height = Math.round(16 * scale + pad * 2 - 3);
+      const bc = big.getContext('2d');
+      bc.fillStyle = pal['.'];
+      bc.fillRect(0, 0, big.width, big.height);
+      bc.imageSmoothingEnabled = false;
+      bc.drawImage(small, pad, pad - 3, 16 * scale, 16 * scale);
+      const img = new Image();
+      img.onload = () => setSource(img, 'sample-mushroom');
+      img.src = big.toDataURL('image/jpeg', 0.6);
+    }
+
+    // ---------------------------------------------------------------
+    // Source preview
+    // ---------------------------------------------------------------
+    function drawSource() {
+      if (!srcCanvas) return;
+      const cv = $('srcCanvas'), wrap = $('srcWrap');
+      const sw = srcCanvas.width, sh = srcCanvas.height;
+      const zv = $('srcZoom').value;
+      const s = zv === 'fit' ? Math.min((wrap.clientWidth || 320) / sw, 440 / sh) : +zv;
+      const dpr = window.devicePixelRatio || 1;
+      const dw = Math.max(1, Math.round(sw * s)), dh = Math.max(1, Math.round(sh * s));
+      cv.style.width = dw + 'px'; cv.style.height = dh + 'px';
+      cv.width = Math.round(dw * dpr); cv.height = Math.round(dh * dpr);
+      const c = cv.getContext('2d');
+      c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      c.imageSmoothingEnabled = s < 1;
+      c.drawImage(srcCanvas, 0, 0, dw, dh);
+      if (!$('showSrcGrid').checked) return;
+      const g = getGrid();
+      const lx = axisLayout(sw, g.cw, g.ox), ly = axisLayout(sh, g.ch, g.oy);
+      const nx = Math.min(MAX_CELLS, lx.n), ny = Math.min(MAX_CELLS, ly.n);
+      if (g.cw * s < 3 || g.ch * s < 3) {
+        // Too dense to draw individual lines; outline the sampled area only.
+        c.strokeStyle = '#ff2bd6';
+        c.lineWidth = 1;
+        c.strokeRect(lx.start * s, ly.start * s, nx * g.cw * s, ny * g.ch * s);
+        return;
+      }
+      c.lineWidth = 1 / dpr;
+      c.strokeStyle = 'rgba(255, 43, 214, 0.85)';
+      c.beginPath();
+      const y0 = ly.start * s, y1 = (ly.start + ny * g.ch) * s;
+      const x0 = lx.start * s, x1 = (lx.start + nx * g.cw) * s;
+      for (let i = 0; i <= nx; i++) { const x = (lx.start + i * g.cw) * s; c.moveTo(x, y0); c.lineTo(x, y1); }
+      for (let j = 0; j <= ny; j++) { const y = (ly.start + j * g.ch) * s; c.moveTo(x0, y); c.lineTo(x1, y); }
+      c.stroke();
+    }
+
+    // ---------------------------------------------------------------
+    // Editor rendering
+    // ---------------------------------------------------------------
+    const editor = $('editor'), ectx = editor.getContext('2d');
+    const off = document.createElement('canvas'), octx = off.getContext('2d');
+    let offImg = null;
+
+    function fitZoom() {
+      if (!W) return;
+      const wrap = $('editorWrap');
+      const aw = (wrap.clientWidth || 600) - 8, ah = Math.max(240, window.innerHeight * 0.7) - 8;
+      zoom = Math.max(1, Math.min(64, Math.floor(Math.min(aw / W, ah / H))));
+    }
+
+    function render() {
+      const has = !!px;
+      editor.hidden = !has;
+      $('emptyMsg').hidden = has;
+      if (!has) return;
+      if (off.width !== W || off.height !== H || !offImg) {
+        off.width = W; off.height = H;
+        offImg = octx.createImageData(W, H);
+      }
+      const u = new Uint32Array(offImg.data.buffer);
+      if ($('highlight').checked && activeColor !== null) {
+        for (let i = 0; i < px.length; i++) {
+          const v = px[i];
+          u[i] = v === activeColor || !v ? v : ((v & 0x00ffffff) | (0x28 << 24)) >>> 0;
+        }
+      } else {
+        u.set(px);
+      }
+      octx.putImageData(offImg, 0, 0);
+
+      const cw = W * zoom, chh = H * zoom;
+      if (editor.width !== cw || editor.height !== chh) { editor.width = cw; editor.height = chh; }
+      ectx.clearRect(0, 0, cw, chh);
+      ectx.imageSmoothingEnabled = false;
+      ectx.drawImage(off, 0, 0, cw, chh);
+
+      if ($('showGrid').checked && zoom >= 5) {
+        ectx.strokeStyle = 'rgba(128,128,128,0.35)';
+        ectx.lineWidth = 1;
+        ectx.beginPath();
+        for (let x = 1; x < W; x++) { ectx.moveTo(x * zoom + 0.5, 0); ectx.lineTo(x * zoom + 0.5, chh); }
+        for (let y = 1; y < H; y++) { ectx.moveTo(0, y * zoom + 0.5); ectx.lineTo(cw, y * zoom + 0.5); }
+        ectx.stroke();
+      }
+      if (hover) {
+        ectx.strokeStyle = '#fff';
+        ectx.lineWidth = 1;
+        ectx.strokeRect(hover.x * zoom + 0.5, hover.y * zoom + 0.5, zoom - 1, zoom - 1);
+        ectx.strokeStyle = '#000';
+        ectx.strokeRect(hover.x * zoom - 0.5, hover.y * zoom - 0.5, zoom + 1, zoom + 1);
+      }
+    }
+
+    // Everything that should refresh after the pixel data changes.
+    function afterChange() {
+      render();
+      renderPalette();
+      updateUndoButtons();
+      const has = !!px;
+      for (const id of ['pngBtn', 'svgBtn', 'copySvgBtn']) $(id).disabled = !has;
+      $('kSlider').disabled = !has;
+      $('gridDims').textContent = srcData ? `source ${srcData.width}×${srcData.height}` : '';
+      updateInfo();
+    }
+
+    function updateInfo() {
+      if (!px) { $('sbInfo').textContent = '—'; $('exportDims').textContent = ''; return; }
+      const n = colorCounts(px).size;
+      $('sbInfo').textContent = `${W} × ${H} px · ${n} color${n === 1 ? '' : 's'} · zoom ${zoom}×`;
+      const s = Math.max(1, Math.round(+$('scale').value || 1));
+      $('exportDims').textContent = `${W * s} × ${H * s}`;
+      if (srcData && document.activeElement !== $('across')) $('across').value = Math.round(srcData.width / getGrid().cw);
+    }
+
+    function setBrush(v) {
+      brush = v;
+      $('brushColor').value = hex(v);
+      markPaletteSelection();
+    }
+
+    // ---------------------------------------------------------------
+    // Palette
+    // ---------------------------------------------------------------
+    const MAX_SWATCHES = 512;
+
+    function renderPalette() {
+      const pal = $('palette');
+      pal.innerHTML = '';
+      if (!px) { $('palCount').textContent = ''; $('activePanel').hidden = true; return; }
+      const counts = [...colorCounts(px)].sort((a, b) => b[1] - a[1]);
+      $('palCount').textContent = counts.length > MAX_SWATCHES
+        ? `top ${MAX_SWATCHES} of ${counts.length}` : `${counts.length} colors`;
+      if (activeColor !== null && !counts.some(c => c[0] === activeColor)) activeColor = null;
+      const frag = document.createDocumentFragment();
+      for (const [v, n] of counts.slice(0, MAX_SWATCHES)) {
+        const b = document.createElement('button');
+        b.className = 'sw';
+        b.style.background = hex(v);
+        b.title = `${hex(v)} · ${n} px`;
+        b.dataset.v = v;
+        frag.appendChild(b);
+      }
+      pal.appendChild(frag);
+      markPaletteSelection();
+
+      const k = $('kSlider');
+      if (!reduceBase) {
+        k.max = Math.max(2, Math.min(64, counts.length));
+        k.value = Math.min(+k.value, +k.max);
+        $('kVal').textContent = `${counts.length} → ${k.value}`;
+      }
+
+      const panel = $('activePanel');
+      panel.hidden = activeColor === null;
+      if (activeColor !== null) {
+        const n = counts.find(c => c[0] === activeColor)[1];
+        $('activeColor').value = hex(activeColor);
+        $('activeHex').textContent = hex(activeColor);
+        $('activeCount').textContent = `${n} px`;
+      }
+    }
+
+    function markPaletteSelection() {
+      for (const b of $('palette').children) {
+        const v = +b.dataset.v;
+        b.classList.toggle('active', v === activeColor);
+        b.classList.toggle('brush', v === brush);
+      }
+    }
+
+    function selectColor(v) {
+      activeColor = v;
+      setBrush(v);
+      renderPalette();
+      render();
+    }
+
+    function replaceAll(from, to) {
+      if (from === to) return;
+      for (let i = 0; i < px.length; i++) if (px[i] === from) px[i] = to;
+    }
+
+    $('palette').addEventListener('click', e => {
+      const b = e.target.closest('.sw');
+      if (!b) return;
+      const v = +b.dataset.v;
+      if (merging) {
+        setMerging(false);
+        if (activeColor !== null && v !== activeColor) {
+          beginEdit();
+          replaceAll(activeColor, v);
+          activeColor = v;
+          setBrush(v);
+          afterChange();
+        }
+        return;
+      }
+      selectColor(v);
+    });
+
+    function setMerging(on) {
+      merging = on;
+      document.body.classList.toggle('merging', on);
+      $('mergeBtn').classList.toggle('on', on);
+      $('mergeBtn').textContent = on ? 'Click target swatch…' : 'Merge into…';
+    }
+
+    $('mergeBtn').addEventListener('click', () => setMerging(!merging));
+
+    $('toBrushBtn').addEventListener('click', () => {
+      if (activeColor === null || activeColor === brush) return;
+      beginEdit();
+      replaceAll(activeColor, brush);
+      activeColor = brush;
+      afterChange();
+    });
+
+    $('clearColorBtn').addEventListener('click', () => {
+      if (activeColor === null) return;
+      beginEdit();
+      replaceAll(activeColor, 0);
+      activeColor = null;
+      afterChange();
+    });
+
+    // Live recolor: remember which pixels had the color so dragging through
+    // another existing color doesn't permanently swallow it.
+    $('activeColor').addEventListener('input', e => {
+      if (activeColor === null) return;
+      if (!recolorIdx) {
+        beginEdit();
+        recolorIdx = [];
+        for (let i = 0; i < px.length; i++) if (px[i] === activeColor) recolorIdx.push(i);
+      }
+      const v = fromHex(e.target.value);
+      for (const i of recolorIdx) px[i] = v;
+      activeColor = v;
+      brush = v;
+      $('brushColor').value = hex(v);
+      $('activeHex').textContent = hex(v);
+      render();
+    });
+
+    $('activeColor').addEventListener('change', () => {
+      recolorIdx = null;
+      afterChange();
+    });
+
+    $('highlight').addEventListener('change', render);
+
+    // ---------------------------------------------------------------
+    // Color reduction slider
+    // ---------------------------------------------------------------
+    let reduceRaf = 0;
+    function doReduce() {
+      reduceRaf = 0;
+      if (!px) return;
+      if (!reduceBase) { pushUndo(); reduceBase = px.slice(); }
+      const K = +$('kSlider').value;
+      px = reduceColors(reduceBase, K, $('keepOrig').checked);
+      activeColor = null;
+      const n = colorCounts(reduceBase).size;
+      $('kVal').textContent = `${n} → ${Math.min(K, n)}`;
+      afterChange();
+    }
+    $('kSlider').addEventListener('input', () => {
+      $('kVal').textContent = $('kVal').textContent.replace(/→ \d+$/, '→ ' + $('kSlider').value);
+      if (!reduceRaf) reduceRaf = requestAnimationFrame(doReduce);
+    });
+    $('keepOrig').addEventListener('change', () => { if (reduceBase) doReduce(); });
+
+    // ---------------------------------------------------------------
+    // Drawing tools
+    // ---------------------------------------------------------------
+    function cellAt(e, clamp) {
+      const r = editor.getBoundingClientRect();
+      let x = Math.floor((e.clientX - r.left) / r.width * W);
+      let y = Math.floor((e.clientY - r.top) / r.height * H);
+      if (clamp) { x = Math.max(0, Math.min(W - 1, x)); y = Math.max(0, Math.min(H - 1, y)); }
+      else if (x < 0 || y < 0 || x >= W || y >= H) return null;
+      return { x, y };
+    }
+
+    function plotLine(a, b, v) {
+      let x0 = a.x, y0 = a.y;
+      const dx = Math.abs(b.x - x0), dy = -Math.abs(b.y - y0);
+      const sx = x0 < b.x ? 1 : -1, sy = y0 < b.y ? 1 : -1;
+      let err = dx + dy;
+      for (;;) {
+        px[y0 * W + x0] = v;
+        if (x0 === b.x && y0 === b.y) break;
+        const e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+      }
+    }
+
+    function floodFill(x, y, v) {
+      const target = px[y * W + x];
+      if (target === v) return;
+      const stack = [y * W + x];
+      while (stack.length) {
+        const i = stack.pop();
+        if (px[i] !== target) continue;
+        px[i] = v;
+        const cx = i % W, cy = (i - cx) / W;
+        if (cx > 0) stack.push(i - 1);
+        if (cx < W - 1) stack.push(i + 1);
+        if (cy > 0) stack.push(i - W);
+        if (cy < H - 1) stack.push(i + W);
+      }
+    }
+
+    editor.addEventListener('contextmenu', e => e.preventDefault());
+
+    editor.addEventListener('pointerdown', e => {
+      if (!px) return;
+      const c = cellAt(e);
+      if (!c) return;
+      e.preventDefault();
+      editor.setPointerCapture(e.pointerId);
+      const t = e.altKey ? 'picker' : tool;
+      const color = e.button === 2 || t === 'eraser' ? 0 : brush;
+      const here = px[c.y * W + c.x];
+      if (t === 'picker') {
+        if (here) selectColor(here);
+        return;
+      }
+      if (t === 'pencil' || t === 'eraser') {
+        beginEdit();
+        drawing = { last: c, color };
+        px[c.y * W + c.x] = color;
+        render();
+        return;
+      }
+      if (t === 'fill') { beginEdit(); floodFill(c.x, c.y, color); afterChange(); return; }
+      if (t === 'replace') {
+        if (here === color) return;
+        beginEdit();
+        replaceAll(here, color);
+        afterChange();
+      }
+    });
+
+    editor.addEventListener('pointermove', e => {
+      if (!px) return;
+      if (drawing) {
+        const c = cellAt(e, true);
+        plotLine(drawing.last, c, drawing.color);
+        drawing.last = c;
+      }
+      hover = cellAt(e);
+      if (hover) {
+        const v = px[hover.y * W + hover.x];
+        $('sbHover').textContent = `(${hover.x}, ${hover.y}) ${v ? hex(v) : 'transparent'}`;
+      } else $('sbHover').textContent = '';
+      render();
+    });
+
+    const endStroke = () => {
+      if (!drawing) return;
+      drawing = null;
+      afterChange();
+    };
+    editor.addEventListener('pointerup', endStroke);
+    editor.addEventListener('pointercancel', endStroke);
+    editor.addEventListener('pointerleave', () => { if (!drawing) { hover = null; $('sbHover').textContent = ''; render(); } });
+
+    editor.addEventListener('wheel', e => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      setZoom(zoom + (e.deltaY < 0 ? 1 : -1) * Math.max(1, Math.round(zoom / 6)));
+    }, { passive: false });
+
+    function setZoom(z) {
+      zoom = Math.max(1, Math.min(64, Math.round(z)));
+      render();
+      updateInfo();
+    }
+
+    function setTool(t) {
+      tool = t;
+      document.querySelectorAll('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
+    }
+
+    document.querySelectorAll('.tool').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+    $('brushColor').addEventListener('input', e => setBrush(fromHex(e.target.value)));
+    $('undoBtn').addEventListener('click', () => restore(undoStack, redoStack));
+    $('redoBtn').addEventListener('click', () => restore(redoStack, undoStack));
+    $('zoomIn').addEventListener('click', () => setZoom(zoom + Math.max(1, Math.round(zoom / 4))));
+    $('zoomOut').addEventListener('click', () => setZoom(zoom - Math.max(1, Math.round(zoom / 4))));
+    $('zoomFit').addEventListener('click', () => { fitZoom(); render(); updateInfo(); });
+    $('showGrid').addEventListener('change', render);
+
+    document.addEventListener('keydown', e => {
+      if (e.target.matches('input, select, textarea')) return;
+      const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
+      if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? restore(redoStack, undoStack) : restore(undoStack, redoStack); return; }
+      if (mod && k === 'y') { e.preventDefault(); restore(redoStack, undoStack); return; }
+      if (mod || e.altKey) return;
+      const tools = { b: 'pencil', e: 'eraser', g: 'fill', r: 'replace', i: 'picker' };
+      if (tools[k]) setTool(tools[k]);
+      else if (k === 'escape' && merging) setMerging(false);
+    });
+
+    // ---------------------------------------------------------------
+    // Grid controls
+    // ---------------------------------------------------------------
+    function onGridInput(e) {
+      if (!srcData) return;
+      if ($('square').checked) {
+        if (e.target.id === 'cw') $('ch').value = $('cw').value;
+        if (e.target.id === 'ch') $('cw').value = $('ch').value;
+      }
+      setStatus('Manual grid.');
+      drawSource();
+      scheduleResample();
+    }
+    for (const id of ['cw', 'ch', 'ox', 'oy']) $(id).addEventListener('input', onGridInput);
+    $('across').addEventListener('input', () => {
+      const n = Math.round(+$('across').value);
+      if (!srcData || !(n >= 1)) return;
+      const cw = srcData.width / n;
+      $('cw').value = +cw.toFixed(3);
+      if ($('square').checked) $('ch').value = +cw.toFixed(3);
+      $('ox').value = 0; $('oy').value = 0;
+      setStatus(`Manual grid: ${n} pixels across.`);
+      drawSource();
+      scheduleResample();
+    });
+    $('square').addEventListener('change', () => {
+      if ($('square').checked && srcData) { $('ch').value = $('cw').value; drawSource(); scheduleResample(); }
+    });
+    $('sampling').addEventListener('change', () => scheduleResample());
+    $('tol').addEventListener('input', () => {
+      $('tolVal').textContent = (+$('tol').value).toFixed(3);
+      if (srcData) scheduleResample();
+    });
+    $('tolVal').textContent = (+$('tol').value).toFixed(3);
+    $('detectBtn').addEventListener('click', () => { if (srcData) runDetect(false); });
+    $('showSrcGrid').addEventListener('change', drawSource);
+    $('srcZoom').addEventListener('change', drawSource);
+
+    // ---------------------------------------------------------------
+    // Import wiring
+    // ---------------------------------------------------------------
+    $('drop').addEventListener('click', () => $('file').click());
+    $('file').addEventListener('change', e => { loadFile(e.target.files[0]); e.target.value = ''; });
+    $('sampleBtn').addEventListener('click', loadSample);
+    $('blankBtn').addEventListener('click', () => newBlank(32, 32));
+
+    let dragDepth = 0;
+    document.addEventListener('dragenter', e => { e.preventDefault(); dragDepth++; document.body.classList.add('dragging'); });
+    document.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dragging'); } });
+    document.addEventListener('dragover', e => e.preventDefault());
+    document.addEventListener('drop', e => {
+      e.preventDefault();
+      dragDepth = 0;
+      document.body.classList.remove('dragging');
+      const f = [...(e.dataTransfer?.files || [])].find(f => f.type.startsWith('image/'));
+      if (f) loadFile(f);
+    });
+    document.addEventListener('paste', e => {
+      const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+      if (item) { e.preventDefault(); loadFile(item.getAsFile()); }
+    });
+
+    // ---------------------------------------------------------------
+    // Export
+    // ---------------------------------------------------------------
+    function exportScale() { return Math.max(1, Math.min(128, Math.round(+$('scale').value || 1))); }
+
+    function buildSVG(scale) {
+      const byColor = new Map();
+      let active = new Map();
+      for (let y = 0; y < H; y++) {
+        const next = new Map();
+        let x = 0;
+        while (x < W) {
+          const v = px[y * W + x];
+          if (!v) { x++; continue; }
+          let x2 = x + 1;
+          while (x2 < W && px[y * W + x2] === v) x2++;
+          const key = x + ',' + (x2 - x) + ',' + v;
+          let r = active.get(key);
+          if (r) r.h++;
+          else {
+            r = { x, y, w: x2 - x, h: 1 };
+            if (!byColor.has(v)) byColor.set(v, []);
+            byColor.get(v).push(r);
+          }
+          next.set(key, r);
+          x = x2;
+        }
+        active = next;
+      }
+      const paths = [...byColor].map(([v, rects]) =>
+        `  <path fill="${hex(v)}" d="${rects.map(r => `M${r.x} ${r.y}h${r.w}v${r.h}h-${r.w}z`).join('')}"/>`);
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="${W * scale}" height="${H * scale}" ` +
+        `viewBox="0 0 ${W} ${H}" shape-rendering="crispEdges">\n${paths.join('\n')}\n</svg>\n`;
+    }
+
+    function download(blob, name) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }
+
+    $('pngBtn').addEventListener('click', () => {
+      if (!px) return;
+      const s = exportScale();
+      render();
+      const c = document.createElement('canvas');
+      c.width = W * s; c.height = H * s;
+      const x = c.getContext('2d');
+      x.imageSmoothingEnabled = false;
+      // Draw from the raw pixels, not the (possibly highlighted) view.
+      const tmp = document.createElement('canvas');
+      tmp.width = W; tmp.height = H;
+      const id = new ImageData(W, H);
+      new Uint32Array(id.data.buffer).set(px);
+      tmp.getContext('2d').putImageData(id, 0, 0);
+      x.drawImage(tmp, 0, 0, W * s, H * s);
+      c.toBlob(b => download(b, `${srcName}-${W}x${H}${s > 1 ? '@' + s + 'x' : ''}.png`), 'image/png');
+    });
+
+    $('svgBtn').addEventListener('click', () => {
+      if (!px) return;
+      download(new Blob([buildSVG(exportScale())], { type: 'image/svg+xml' }), `${srcName}-${W}x${H}.svg`);
+    });
+
+    $('copySvgBtn').addEventListener('click', async () => {
+      if (!px) return;
+      const btn = $('copySvgBtn');
+      try {
+        await navigator.clipboard.writeText(buildSVG(exportScale()));
+        btn.textContent = 'Copied!';
+      } catch {
+        btn.textContent = 'Copy failed';
+      }
+      setTimeout(() => { btn.textContent = 'Copy SVG'; }, 1200);
+    });
+
+    $('scale').addEventListener('input', updateInfo);
+
+    let resizeTimer = 0;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(drawSource, 100);
+    });
+
+    afterChange();
+  </script>
+</body>
+</html>
