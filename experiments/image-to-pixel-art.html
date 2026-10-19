@@ -356,8 +356,9 @@
       <ul>
         <li><strong>Import</strong> — drop, paste (<code>Ctrl/⌘+V</code>) or pick an image, or try the sample sprite.
           The detected grid is drawn over the source preview; zoom in to check it lines up.</li>
-        <li><strong>Grid</strong> — tweak cell size / offset if detection is off, or set <em>Pixels across</em> to
-          pixelize a photo. Use <em>Center median</em> sampling for sprites and <em>Cell average</em> for photos.
+        <li><strong>Grid</strong> — tweak cell size / offset if detection is off, or drag the
+          <em>Resolution</em> slider (or type <em>Pixels across</em>) to rescale in real time — handy for
+          pixelizing photos. <em>Detected</em> jumps back to the auto-detected grid. Use <em>Center median</em> sampling for sprites and <em>Cell average</em> for photos.
           Changing the grid re-samples the image (undoable).</li>
         <li><strong>Edit</strong> — Pencil <code>B</code>, Eraser <code>E</code>, Fill <code>G</code>,
           Replace color <code>R</code> (all pixels of the clicked color), Eyedropper <code>I</code>.
@@ -425,6 +426,12 @@
                 <option value="average">Cell average (photos)</option>
               </select>
             </label>
+          </div>
+          <div class="row" style="margin-top:0.75rem">
+            <label class="f grow">Resolution: <span id="resVal">—</span>
+              <input type="range" id="resSlider" min="0" max="1000" step="1" value="500" disabled>
+            </label>
+            <button id="resetResBtn" title="Return to the auto-detected grid" disabled>Detected</button>
           </div>
           <div class="row">
             <label class="chk"><input type="checkbox" id="square" checked> Square cells</label>
@@ -603,6 +610,7 @@
     let srcData = null, srcCanvas = null, srcName = 'pixel-art';
     let W = 0, H = 0, px = null;              // pixel art
     let undoStack = [], redoStack = [];
+    let detectedGrid = null;                  // grid from the last auto-detect (or its fallback)
     let tool = 'pencil', brush = pack(0, 0, 0);
     let activeColor = null, merging = false;
     let zoom = 8, hover = null, drawing = null;
@@ -759,7 +767,6 @@
         for (let gx = 0; gx < w; gx++) {
           const [x0, x1] = range(lx.start, g.cw, gx, clampX);
           let total = 0, opaque = 0, sr = 0, sg = 0, sb = 0;
-          if (median) { hr.fill(0); hg.fill(0); hb.fill(0); }
           for (let y = y0; y <= y1; y++) {
             for (let x = x0; x <= x1; x++) {
               const i = (y * sw + x) * 4;
@@ -776,6 +783,13 @@
             const half = opaque / 2;
             const med = hist => { let acc = 0; for (let c = 0; c < 256; c++) { acc += hist[c]; if (acc >= half) return c; } return 255; };
             v = pack(med(hr), med(hg), med(hb));
+            // Clear only the bins this cell touched (much cheaper than fill() for small cells).
+            for (let y = y0; y <= y1; y++) {
+              for (let x = x0; x <= x1; x++) {
+                const i = (y * sw + x) * 4;
+                hr[d[i]] = hg[d[i + 1]] = hb[d[i + 2]] = 0;
+              }
+            }
           } else {
             v = pack(Math.round(sr / opaque), Math.round(sg / opaque), Math.round(sb / opaque));
           }
@@ -976,9 +990,11 @@
         const sw = srcData.width, sh = srcData.height;
         const t0 = performance.now();
         const r = detectGrid(srcData);
+        detectedGrid = null;
         const ms = Math.round(performance.now() - t0);
         if (r && r.conf >= 0.35) {
           setGridInputs(r);
+          detectedGrid = r;
           $('sampling').value = 'median';
           setStatus(`Detected ${r.cw.toFixed(2)} × ${r.ch.toFixed(2)} px cells · confidence ${Math.round(r.conf * 100)}% (${ms} ms)`, 'ok');
         } else if (Math.max(sw, sh) <= 256) {
@@ -991,13 +1007,17 @@
           $('sampling').value = 'average';
           setStatus('No pixel grid found (looks like a regular image) — pixelizing to 64 pixels across. Adjust "Pixels across" as needed.', 'warn');
         }
+        if (!detectedGrid) detectedGrid = getGrid();
+        $('resetResBtn').disabled = false;
+        $('resSlider').disabled = false;
         resample(fresh);
       }, 20);
     }
 
-    function resample(fresh) {
+    // fresh: a new image (no undo entry). live: part of a slider drag that already pushed one.
+    function resample(fresh, live) {
       if (!srcData) return;
-      if (!fresh) beginEdit(); else reduceBase = null;
+      if (!fresh && !live) beginEdit(); else reduceBase = null;
       const { w, h, out, truncated } = sampleImage();
       mergeSimilar(out, +$('tol').value);
       const resized = w !== W || h !== H;
@@ -1175,7 +1195,12 @@
       $('sbInfo').textContent = `${W} × ${H} px · ${n} color${n === 1 ? '' : 's'} · zoom ${zoom}×`;
       const s = Math.max(1, Math.round(+$('scale').value || 1));
       $('exportDims').textContent = `${W * s} × ${H * s}`;
-      if (srcData && document.activeElement !== $('across')) $('across').value = Math.round(srcData.width / getGrid().cw);
+      if (srcData) {
+        const n = Math.round(srcData.width / getGrid().cw);
+        if (document.activeElement !== $('across')) $('across').value = n;
+        if (!resDragging) $('resSlider').value = acrossToSlider(n);
+        $('resVal').textContent = `${n} px across`;
+      }
     }
 
     function setBrush(v) {
@@ -1483,16 +1508,46 @@
       scheduleResample();
     }
     for (const id of ['cw', 'ch', 'ox', 'oy']) $(id).addEventListener('input', onGridInput);
+    // Set the grid to n cells across, keeping the current cell aspect ratio.
+    function setAcross(n) {
+      const g = getGrid(), cw = srcData.width / n;
+      const ch = $('square').checked ? cw : cw * (g.ch / g.cw);
+      $('cw').value = +cw.toFixed(3);
+      $('ch').value = +ch.toFixed(3);
+      $('ox').value = 0; $('oy').value = 0;
+      setStatus(`Manual grid: ${n} pixels across.`);
+    }
+
     $('across').addEventListener('input', () => {
       const n = Math.round(+$('across').value);
       if (!srcData || !(n >= 1)) return;
-      const cw = srcData.width / n;
-      $('cw').value = +cw.toFixed(3);
-      if ($('square').checked) $('ch').value = +cw.toFixed(3);
-      $('ox').value = 0; $('oy').value = 0;
-      setStatus(`Manual grid: ${n} pixels across.`);
+      setAcross(n);
       drawSource();
       scheduleResample();
+    });
+
+    // Resolution slider: log-scaled from 2 px across to the source width (capped), resampled live.
+    const resMax = () => Math.max(3, Math.min(MAX_CELLS, srcData ? srcData.width : 64));
+    const sliderToAcross = t => Math.round(Math.exp(Math.log(2) + (t / 1000) * (Math.log(resMax()) - Math.log(2))));
+    const acrossToSlider = n => Math.round(1000 * (Math.log(Math.max(2, n)) - Math.log(2)) / (Math.log(resMax()) - Math.log(2)));
+    let resDragging = false, resRaf = 0;
+
+    $('resSlider').addEventListener('input', () => {
+      if (!srcData) return;
+      if (!resDragging) { resDragging = true; beginEdit(); clearTimeout(resampleTimer); }
+      const n = sliderToAcross(+$('resSlider').value);
+      $('resVal').textContent = `${n} px across`;
+      if (Math.round(srcData.width / getGrid().cw) === n) return;
+      setAcross(n);
+      if (!resRaf) resRaf = requestAnimationFrame(() => { resRaf = 0; resample(false, true); });
+    });
+    $('resSlider').addEventListener('change', () => { resDragging = false; updateInfo(); });
+
+    $('resetResBtn').addEventListener('click', () => {
+      if (!srcData || !detectedGrid) return;
+      setGridInputs(detectedGrid);
+      setStatus('Back to the detected grid.');
+      resample(false);
     });
     $('square').addEventListener('change', () => {
       if ($('square').checked && srcData) { $('ch').value = $('cw').value; drawSource(); scheduleResample(); }
