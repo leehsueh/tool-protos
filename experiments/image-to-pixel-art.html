@@ -272,6 +272,9 @@
       image-rendering: pixelated;
     }
 
+    .editor-wrap.can-pan, .editor-wrap.can-pan #editor { cursor: grab; }
+    .editor-wrap.panning, .editor-wrap.panning #editor { cursor: grabbing; }
+
     .empty {
       margin: auto;
       color: #8b949e;
@@ -364,7 +367,9 @@
           Replace color <code>R</code> (all pixels of the clicked color), Eyedropper <code>I</code>.
           Right-click paints transparent with any tool; <code>Alt</code>+click picks a color.
           Undo <code>Ctrl/⌘+Z</code>, redo <code>Ctrl/⌘+Shift+Z</code> or <code>Ctrl+Y</code>.
-          <code>Ctrl</code>+wheel zooms.</li>
+          <code>Ctrl</code>+wheel zooms around the cursor. Pan with the Hand tool <code>H</code>, by holding
+          <code>Space</code> and dragging, with a middle-mouse drag, or with two fingers on touch screens
+          (pinch to zoom).</li>
         <li><strong>Palette</strong> — click a swatch to select it and make it the brush color. Then recolor every
           pixel of that color, make it transparent, merge it into another swatch, or highlight where it is used.</li>
         <li><strong>Reduce colors</strong> — drag the slider to merge the palette down to N colors (live preview,
@@ -469,6 +474,7 @@
             <button class="tool" data-tool="fill" title="Fill contiguous (G)">🪣<kbd>G</kbd></button>
             <button class="tool" data-tool="replace" title="Replace color everywhere (R)">🔁<kbd>R</kbd></button>
             <button class="tool" data-tool="picker" title="Eyedropper (I)">💧<kbd>I</kbd></button>
+            <button class="tool" data-tool="hand" title="Pan (H, or hold Space / middle-drag)">✋<kbd>H</kbd></button>
             <span class="sep"></span>
             <input type="color" id="brushColor" value="#000000" title="Brush color">
             <span class="sep"></span>
@@ -1404,38 +1410,37 @@
 
     editor.addEventListener('contextmenu', e => e.preventDefault());
 
+    function applyTool(c, t, color) {
+      const here = px[c.y * W + c.x];
+      if (t === 'picker') { if (here) selectColor(here); return; }
+      if (t === 'fill') { beginEdit(); floodFill(c.x, c.y, color); afterChange(); return; }
+      if (t === 'replace' && here !== color) { beginEdit(); replaceAll(here, color); afterChange(); }
+    }
+
+    let pendingTap = null; // touch taps for one-shot tools wait for pointerup, so a 2-finger gesture can cancel them
+
     editor.addEventListener('pointerdown', e => {
-      if (!px) return;
+      if (!px || pan) return;
       const c = cellAt(e);
       if (!c) return;
       e.preventDefault();
       editor.setPointerCapture(e.pointerId);
       const t = e.altKey ? 'picker' : tool;
       const color = e.button === 2 || t === 'eraser' ? 0 : brush;
-      const here = px[c.y * W + c.x];
-      if (t === 'picker') {
-        if (here) selectColor(here);
-        return;
-      }
       if (t === 'pencil' || t === 'eraser') {
         beginEdit();
-        drawing = { last: c, color };
+        drawing = { last: c, color, id: e.pointerId };
         px[c.y * W + c.x] = color;
         render();
         return;
       }
-      if (t === 'fill') { beginEdit(); floodFill(c.x, c.y, color); afterChange(); return; }
-      if (t === 'replace') {
-        if (here === color) return;
-        beginEdit();
-        replaceAll(here, color);
-        afterChange();
-      }
+      if (e.pointerType === 'touch') { pendingTap = { c, t, color, id: e.pointerId }; return; }
+      applyTool(c, t, color);
     });
 
     editor.addEventListener('pointermove', e => {
-      if (!px) return;
-      if (drawing) {
+      if (!px || pan) return;
+      if (drawing && e.pointerId === drawing.id) {
         const c = cellAt(e, true);
         plotLine(drawing.last, c, drawing.color);
         drawing.last = c;
@@ -1448,7 +1453,13 @@
       render();
     });
 
-    const endStroke = () => {
+    const endStroke = e => {
+      if (pendingTap && e.type === 'pointerup' && e.pointerId === pendingTap.id) {
+        const tap = pendingTap;
+        pendingTap = null;
+        applyTool(tap.c, tap.t, tap.color);
+      }
+      pendingTap = null;
       if (!drawing) return;
       drawing = null;
       afterChange();
@@ -1457,21 +1468,122 @@
     editor.addEventListener('pointercancel', endStroke);
     editor.addEventListener('pointerleave', () => { if (!drawing) { hover = null; $('sbHover').textContent = ''; render(); } });
 
+    // Undo a stroke that turned out to be the first finger of a two-finger gesture.
+    function cancelStroke() {
+      pendingTap = null;
+      if (!drawing) return;
+      drawing = null;
+      const s = undoStack.pop();
+      if (s) { px = s.px; W = s.W; H = s.H; }
+      afterChange();
+    }
+
+    // ---------------------------------------------------------------
+    // Zoom & pan
+    // ---------------------------------------------------------------
+    const wrap = $('editorWrap');
+
+    // Zoom while keeping the image point under (clientX, clientY) fixed; defaults to the view center.
+    function setZoom(z, clientX, clientY) {
+      z = Math.max(1, Math.min(64, Math.round(z)));
+      if (z === zoom || !px) { zoom = z; updateInfo(); return; }
+      const wr = wrap.getBoundingClientRect();
+      if (clientX === undefined) { clientX = wr.left + wr.width / 2; clientY = wr.top + wr.height / 2; }
+      const r0 = editor.getBoundingClientRect();
+      const fx = (clientX - r0.left) / r0.width, fy = (clientY - r0.top) / r0.height;
+      zoom = z;
+      render();
+      const r1 = editor.getBoundingClientRect();
+      wrap.scrollLeft += r1.left + fx * r1.width - clientX;
+      wrap.scrollTop += r1.top + fy * r1.height - clientY;
+      updateInfo();
+    }
+
     editor.addEventListener('wheel', e => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
-      setZoom(zoom + (e.deltaY < 0 ? 1 : -1) * Math.max(1, Math.round(zoom / 6)));
+      setZoom(zoom + (e.deltaY < 0 ? 1 : -1) * Math.max(1, Math.round(zoom / 6)), e.clientX, e.clientY);
     }, { passive: false });
 
-    function setZoom(z) {
-      zoom = Math.max(1, Math.min(64, Math.round(z)));
-      render();
-      updateInfo();
-    }
+    let pan = null, spaceDown = false;
+    const touches = new Map();
+    const canPan = () => tool === 'hand' || spaceDown;
+    const updatePanCursor = () => wrap.classList.toggle('can-pan', canPan());
+
+    // Capture phase so a pan gesture never reaches the drawing handlers.
+    wrap.addEventListener('pointerdown', e => {
+      if (!px) return;
+      if (e.pointerType === 'touch') {
+        touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (touches.size === 2) {
+          cancelStroke();
+          const [a, b] = [...touches.values()];
+          pan = { touch: true, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, dist: Math.hypot(a.x - b.x, a.y - b.y), zoom };
+          e.stopPropagation();
+          return;
+        }
+      }
+      if (e.button === 1 || (e.button === 0 && canPan())) {
+        e.preventDefault();
+        e.stopPropagation();
+        wrap.setPointerCapture(e.pointerId);
+        pan = { id: e.pointerId, x: e.clientX, y: e.clientY };
+        wrap.classList.add('panning');
+      }
+    }, true);
+
+    wrap.addEventListener('pointermove', e => {
+      if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (!pan) return;
+      e.stopPropagation();
+      if (pan.touch) {
+        if (touches.size < 2) return;
+        const [a, b] = [...touches.values()];
+        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        wrap.scrollLeft -= mx - pan.mx;
+        wrap.scrollTop -= my - pan.my;
+        pan.mx = mx; pan.my = my;
+        const z = Math.round(pan.zoom * Math.hypot(a.x - b.x, a.y - b.y) / pan.dist);
+        if (z !== zoom) setZoom(z, mx, my);
+        return;
+      }
+      if (e.pointerId !== pan.id) return;
+      wrap.scrollLeft -= e.clientX - pan.x;
+      wrap.scrollTop -= e.clientY - pan.y;
+      pan.x = e.clientX; pan.y = e.clientY;
+    }, true);
+
+    const endPan = e => {
+      touches.delete(e.pointerId);
+      if (!pan) return;
+      if (pan.touch ? touches.size === 0 : e.pointerId === pan.id) {
+        pan = null;
+        wrap.classList.remove('panning');
+      }
+    };
+    wrap.addEventListener('pointerup', endPan, true);
+    wrap.addEventListener('pointercancel', endPan, true);
+    wrap.addEventListener('auxclick', e => { if (e.button === 1) e.preventDefault(); });
+
+    // Space pans while the pointer is over the editor (even if a toolbar button has focus).
+    let overEditor = false;
+    wrap.addEventListener('pointerenter', () => { overEditor = true; });
+    wrap.addEventListener('pointerleave', () => { overEditor = false; });
+    document.addEventListener('keydown', e => {
+      if (e.code !== 'Space' || !overEditor || e.target.matches('input, select, textarea')) return;
+      e.preventDefault();
+      if (e.target.matches('button')) e.target.blur();
+      if (!spaceDown) { spaceDown = true; updatePanCursor(); }
+    });
+    document.addEventListener('keyup', e => {
+      if (e.code === 'Space') { spaceDown = false; updatePanCursor(); }
+    });
+    window.addEventListener('blur', () => { spaceDown = false; updatePanCursor(); });
 
     function setTool(t) {
       tool = t;
       document.querySelectorAll('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
+      updatePanCursor();
     }
 
     document.querySelectorAll('.tool').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
@@ -1489,7 +1601,7 @@
       if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? restore(redoStack, undoStack) : restore(undoStack, redoStack); return; }
       if (mod && k === 'y') { e.preventDefault(); restore(redoStack, undoStack); return; }
       if (mod || e.altKey) return;
-      const tools = { b: 'pencil', e: 'eraser', g: 'fill', r: 'replace', i: 'picker' };
+      const tools = { b: 'pencil', e: 'eraser', g: 'fill', r: 'replace', i: 'picker', h: 'hand' };
       if (tools[k]) setTool(tools[k]);
       else if (k === 'escape' && merging) setMerging(false);
     });
