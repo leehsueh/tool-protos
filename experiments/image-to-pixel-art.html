@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#161b22">
   <meta name="description" content="Turn an image or upscaled sprite into editable pixel art — auto-detects the pixel grid, reduces colors, lets you repaint, and exports SVG or PNG.">
   <meta name="date" content="2026-10-19">
   <meta name="tags" content="image, pixel art, sprite, svg, png, editor">
@@ -388,13 +389,281 @@
     .proj button.danger:hover { border-color: #f85149; color: #f85149; }
 
     .mono { font-family: ui-monospace, monospace; font-size: 0.8rem; }
+
+    /* --- Brush chip: a color input dressed as a swatch (can show "transparent") --- */
+    .brush-chip {
+      position: relative;
+      display: inline-block;
+      width: 2.2rem;
+      height: 2rem;
+      border-radius: 6px;
+      border: 1px solid #30363d;
+      box-shadow: inset 0 0 0 2px #0d1117;
+      cursor: pointer;
+      flex: none;
+    }
+    .brush-chip input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+
+    .toolbar .tools-main, .toolbar .tools-sub { display: contents; }
+    .empty p { margin-bottom: 0.75rem; }
+    .empty-actions { justify-content: center; }
+
+    /* Phone-only chrome, hidden on wide screens */
+    .mtop, .tabbar, .quick-pal, .sheet-spacer, .sheet-close, .mob-only, .toast { display: none; }
+
+    /* =============================================================
+       PHONE / NARROW LAYOUT — an app shell: canvas fills the screen,
+       tools + quick colors + tabs sit in the thumb zone, panels open
+       as bottom sheets between the canvas and the tools.
+    ============================================================= */
+    @media (max-width: 860px) {
+      :root {
+        --top-h: 48px;
+        --tab-h: calc(56px + env(safe-area-inset-bottom));
+      }
+
+      html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+      body { padding: 0; -webkit-tap-highlight-color: transparent; }
+      body > nav:not(.tabbar), main > h1, .desk-only, .toolbar kbd, .toolbar .sep { display: none; }
+      .mob-only { display: inline; }
+
+      /* Bigger, thumb-friendly controls everywhere */
+      button { min-height: 44px; padding: 0.5rem 0.85rem; font-size: 0.9rem; border-radius: 10px; }
+      input[type=number], input[type=text], select { font-size: 16px; padding: 0.55rem 0.6rem; border-radius: 10px; }
+      input[type=range] { height: 36px; }
+      input[type=checkbox] { width: 22px; height: 22px; accent-color: #58a6ff; }
+      label.chk { font-size: 0.95rem; min-height: 44px; gap: 0.5rem; }
+      label.f { font-size: 0.82rem; }
+      .hint { font-size: 0.82rem; }
+      .row { gap: 0.6rem; }
+
+      .mtop {
+        display: flex;
+        position: fixed;
+        top: 0; left: 0; right: 0;
+        height: var(--top-h);
+        padding: 0 0.5rem;
+        padding-top: env(safe-area-inset-top);
+        box-sizing: content-box;
+        align-items: center;
+        gap: 0.25rem;
+        background: #161b22;
+        border-bottom: 1px solid #30363d;
+        z-index: 40;
+      }
+      .mtop .mback, .mtop .mhelp {
+        display: grid;
+        place-items: center;
+        width: 44px;
+        height: 44px;
+        min-height: 0;
+        padding: 0;
+        color: #58a6ff;
+        text-decoration: none;
+        font-size: 1.25rem;
+        background: none;
+        border: none;
+      }
+      .mtop .mhelp { margin-left: auto; font-weight: 700; }
+      .mtop .mtitle { font-weight: 700; color: #f0f6fc; font-size: 1rem; }
+
+      main { max-width: none; }
+      .layout, .col, .panels { display: block; }
+
+      /* Editor becomes the full-screen workspace */
+      .editor-card {
+        position: fixed;
+        top: calc(var(--top-h) + env(safe-area-inset-top));
+        left: 0; right: 0;
+        bottom: var(--tab-h);
+        display: flex;
+        flex-direction: column;
+        padding: 0;
+        border: none;
+        border-radius: 0;
+        background: #0d1117;
+        z-index: 5;
+      }
+      .editor-wrap {
+        order: 1;
+        flex: 1;
+        min-height: 0;
+        max-height: none;
+        margin: 0;
+        border: none;
+        border-radius: 0;
+        touch-action: none;
+      }
+      .statusbar { order: 2; margin: 0; padding: 0.3rem 0.75rem; background: #0d1117; border-top: 1px solid #21262d; }
+      .sheet-spacer { display: block; order: 3; flex: none; height: var(--sheet-h, 0px); }
+
+      .quick-pal {
+        display: flex;
+        order: 4;
+        gap: 6px;
+        padding: 8px 10px 4px;
+        overflow-x: auto;
+        background: #161b22;
+        border-top: 1px solid #30363d;
+        scrollbar-width: none;
+        touch-action: pan-x;
+      }
+      .quick-pal::-webkit-scrollbar { display: none; }
+      .quick-pal .sw { flex: none; width: 38px; height: 38px; min-height: 0; border-radius: 10px; }
+      .quick-pal .sw.none { position: relative; }
+      .quick-pal .sw.none::before {
+        content: '';
+        position: absolute;
+        left: 50%; top: 10%;
+        width: 2px; height: 80%;
+        background: #f85149;
+        transform: rotate(45deg);
+      }
+      .quick-pal .empty-hint { color: #8b949e; font-size: 0.8rem; align-self: center; white-space: nowrap; }
+
+      .toolbar {
+        order: 5;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+        padding: 6px 10px 8px;
+        background: #161b22;
+      }
+      body.sheet-open .toolbar { display: none; }
+      .toolbar .tools-main, .toolbar .tools-sub { display: flex; gap: 6px; align-items: center; }
+      .toolbar .tools-sub { order: 1; }
+      .toolbar .tools-main { order: 2; }
+      .tools-sub button { flex: 1; min-height: 40px; padding: 0.3rem; font-size: 0.9rem; }
+      .tools-sub .gridchk { flex: none; min-height: 40px; padding: 0 0.25rem; font-size: 0.85rem; }
+      .tools-main .tool { flex: 1; min-width: 0; height: 50px; padding: 0; font-size: 1.35rem; }
+      .tools-main .brush-chip { width: 50px; height: 50px; border-radius: 12px; }
+
+      .empty { padding: 1.5rem 1rem; }
+
+      /* Bottom navigation */
+      .tabbar {
+        display: flex;
+        position: fixed;
+        left: 0; right: 0; bottom: 0;
+        height: var(--tab-h);
+        margin: 0;
+        padding-bottom: env(safe-area-inset-bottom);
+        background: #161b22;
+        border-top: 1px solid #30363d;
+        z-index: 40;
+      }
+      .tabbar button {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1px;
+        min-height: 0;
+        padding: 0;
+        border: none;
+        border-radius: 0;
+        background: none;
+        color: #8b949e;
+        font-size: 0.68rem;
+      }
+      .tabbar button span { font-size: 1.2rem; line-height: 1.2; }
+      .tabbar button.on { color: #58a6ff; background: #58a6ff14; }
+
+      /* Bottom sheets */
+      .sheet {
+        display: none;
+        position: fixed;
+        left: 0; right: 0;
+        bottom: calc(var(--tab-h) + var(--tools-h, 0px));
+        max-width: none;
+        max-height: 44dvh;
+        margin: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        border-radius: 16px 16px 0 0;
+        border-bottom: none;
+        padding: 0.4rem 1rem 1rem;
+        box-shadow: 0 -10px 30px #000a;
+        z-index: 30;
+      }
+      .sheet.open { display: block; }
+      .sheet > h3, details.sheet > summary {
+        position: sticky;
+        top: -0.4rem;
+        margin: -0.4rem -1rem 0.6rem;
+        padding: 0.5rem 0.5rem 0.5rem 1rem;
+        background: #161b22;
+        border-bottom: 1px solid #21262d;
+        align-items: center;
+        z-index: 1;
+        font-size: 0.8rem;
+      }
+      details.sheet > summary { display: flex; pointer-events: none; }
+      details.sheet > summary::before { content: none; }
+      details.sheet .docs { margin-top: 0; }
+      .sheet-close {
+        display: grid;
+        place-items: center;
+        margin-left: auto;
+        width: 40px;
+        height: 40px;
+        min-height: 0;
+        padding: 0;
+        border-radius: 50%;
+        font-size: 1rem;
+        pointer-events: auto;
+        flex: none;
+      }
+      .sheet > h3 .meta { margin-left: auto; }
+      .sheet > h3 .meta + .sheet-close { margin-left: 0.5rem; }
+
+      .fields { gap: 0.6rem; }
+      .src-wrap { max-height: 40dvh; }
+      .palette { max-height: none; gap: 6px; }
+      .palette .sw { width: 38px; height: 38px; min-height: 0; border-radius: 10px; }
+      .projects { grid-template-columns: minmax(0, 1fr); }
+      .proj button { min-height: 44px; }
+      .drop { padding: 1.5rem 1rem; font-size: 0.95rem; }
+
+      .toast {
+        display: block;
+        position: fixed;
+        left: 50%;
+        top: calc(var(--top-h) + env(safe-area-inset-top) + 10px);
+        transform: translate(-50%, -8px);
+        max-width: calc(100% - 32px);
+        padding: 0.55rem 0.9rem;
+        border-radius: 12px;
+        background: #21262dee;
+        border: 1px solid #30363d;
+        color: #e6edf3;
+        font-size: 0.85rem;
+        line-height: 1.4;
+        box-shadow: 0 6px 20px #0008;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s, transform 0.2s;
+        z-index: 50;
+      }
+      .toast.show { opacity: 1; transform: translate(-50%, 0); }
+      .toast.warn { border-color: #d29922; }
+    }
     .grow { flex: 1; }
   </style>
 </head>
 <body>
+  <!-- Phone-only top bar -->
+  <header class="mtop">
+    <a href="../index.html" class="mback" aria-label="Back to experiments">←</a>
+    <span class="mtitle">Image to Pixel Art</span>
+    <button class="mhelp" data-open="help" aria-label="How this works">?</button>
+  </header>
+
   <nav><a href="../index.html">← Back to experiments</a></nav>
 
-  <details>
+  <details class="sheet" data-sheet="help">
     <summary>How this works</summary>
     <div class="docs">
       <h2>About</h2>
@@ -423,6 +692,10 @@
         <li><strong>Reduce colors</strong> — drag the slider to merge the palette down to N colors (live preview,
           one undo step).</li>
         <li><strong>Export</strong> — PNG at any integer scale, or SVG with one path per color.</li>
+        <li><strong>On a phone</strong> — the canvas fills the screen and everything sits in the thumb zone:
+          tools along the bottom, a scrollable strip of the image's colors above them (tap = brush color,
+          long-press = open it in the palette, the crossed swatch paints transparent), and a tab bar that
+          opens each panel as a bottom sheet. One finger draws; two fingers pan and pinch-zoom.</li>
         <li><strong>Save / open / delete</strong> — projects are kept in this browser only (nothing is uploaded).
           <em>Save</em> (<code>Ctrl/⌘+S</code>) updates the open project; <em>Save as new</em> makes a copy.
           Undo history is not saved. Clearing site data removes saved projects.</li>
@@ -459,10 +732,11 @@
     <div class="layout">
       <!-- ============ LEFT: import + grid ============ -->
       <div class="col">
-        <section class="card">
+        <section class="card sheet" data-sheet="import">
           <h3>Import</h3>
           <div class="drop" id="drop">
-            <strong>Drop an image</strong>, paste, or click to choose<br>
+            <span class="desk-only"><strong>Drop an image</strong>, paste, or click to choose</span>
+            <span class="mob-only"><strong>Tap to choose a photo or image</strong></span><br>
             <span class="hint">PNG, JPG, GIF, WebP…</span>
           </div>
           <input type="file" id="file" accept="image/*" hidden>
@@ -472,7 +746,7 @@
           </div>
         </section>
 
-        <section class="card">
+        <section class="card sheet" data-sheet="grid">
           <h3>Grid <span class="meta" id="gridDims"></span></h3>
           <div class="fields">
             <label class="f">Cell width (px)<input type="number" id="cw" min="1" step="0.01" value="1"></label>
@@ -522,37 +796,50 @@
 
       <!-- ============ RIGHT: editor ============ -->
       <div class="col">
-        <section class="card">
-          <div class="toolbar">
-            <button class="tool on" data-tool="pencil" title="Pencil (B)">✏️<kbd>B</kbd></button>
-            <button class="tool" data-tool="eraser" title="Eraser (E)">🧽<kbd>E</kbd></button>
-            <button class="tool" data-tool="fill" title="Fill contiguous (G)">🪣<kbd>G</kbd></button>
-            <button class="tool" data-tool="replace" title="Replace color everywhere (R)">🔁<kbd>R</kbd></button>
-            <button class="tool" data-tool="picker" title="Eyedropper (I)">💧<kbd>I</kbd></button>
-            <button class="tool" data-tool="hand" title="Pan (H, or hold Space / middle-drag)">✋<kbd>H</kbd></button>
+        <section class="card editor-card" id="editorCard">
+          <div class="toolbar" id="toolbar">
+            <div class="tools-main">
+              <button class="tool on" data-tool="pencil" title="Pencil (B)" aria-label="Pencil">✏️<kbd>B</kbd></button>
+              <button class="tool" data-tool="eraser" title="Eraser (E)" aria-label="Eraser">🧽<kbd>E</kbd></button>
+              <button class="tool" data-tool="fill" title="Fill contiguous (G)" aria-label="Fill">🪣<kbd>G</kbd></button>
+              <button class="tool" data-tool="replace" title="Replace color everywhere (R)" aria-label="Replace color">🔁<kbd>R</kbd></button>
+              <button class="tool" data-tool="picker" title="Eyedropper (I)" aria-label="Eyedropper">💧<kbd>I</kbd></button>
+              <button class="tool" data-tool="hand" title="Pan (H, or hold Space / middle-drag)" aria-label="Pan">✋<kbd>H</kbd></button>
+              <label class="brush-chip" id="brushChip" title="Brush color">
+                <input type="color" id="brushColor" value="#000000" aria-label="Brush color">
+              </label>
+            </div>
             <span class="sep"></span>
-            <input type="color" id="brushColor" value="#000000" title="Brush color">
-            <span class="sep"></span>
-            <button id="undoBtn" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
-            <button id="redoBtn" title="Redo (Ctrl+Shift+Z)" disabled>↷ Redo</button>
-            <span class="sep"></span>
-            <button id="zoomOut" title="Zoom out">−</button>
-            <button id="zoomFit" title="Fit to view">Fit</button>
-            <button id="zoomIn" title="Zoom in">+</button>
-            <label class="chk"><input type="checkbox" id="showGrid" checked> Grid</label>
+            <div class="tools-sub">
+              <button id="undoBtn" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
+              <button id="redoBtn" title="Redo (Ctrl+Shift+Z)" disabled>↷ Redo</button>
+              <span class="sep"></span>
+              <button id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
+              <button id="zoomFit" title="Fit to view">Fit</button>
+              <button id="zoomIn" title="Zoom in" aria-label="Zoom in">+</button>
+              <label class="chk gridchk"><input type="checkbox" id="showGrid" checked> Grid</label>
+            </div>
           </div>
           <div class="editor-wrap checker" id="editorWrap">
-            <div class="empty" id="emptyMsg">Your pixel art will appear here.</div>
+            <div class="empty" id="emptyMsg">
+              <p>Your pixel art will appear here.</p>
+              <div class="row empty-actions">
+                <button class="primary" id="emptyChoose">Choose image</button>
+                <button id="emptySample">Try a sample</button>
+              </div>
+            </div>
             <canvas id="editor" hidden></canvas>
           </div>
           <div class="statusbar">
             <span id="sbInfo">—</span>
             <span id="sbHover"></span>
           </div>
+          <div class="sheet-spacer" aria-hidden="true"></div>
+          <div class="quick-pal" id="quickPal" aria-label="Quick colors"></div>
         </section>
 
         <div class="panels">
-          <section class="card">
+          <section class="card sheet" data-sheet="palette">
             <h3>Palette <span class="meta" id="palCount"></span></h3>
             <div class="palette" id="palette"></div>
             <div class="active-panel" id="activePanel" hidden>
@@ -573,7 +860,7 @@
             </div>
           </section>
 
-          <section class="card">
+          <section class="card sheet" data-sheet="reduce">
             <h3>Reduce colors <span class="meta" id="kVal"></span></h3>
             <input type="range" id="kSlider" min="2" max="64" step="1" value="16" disabled>
             <div class="row">
@@ -583,7 +870,7 @@
               Keep original colors snaps each group to a color that already exists in the image.</p>
           </section>
 
-          <section class="card">
+          <section class="card sheet" data-sheet="export">
             <h3>Export <span class="meta" id="exportDims"></span></h3>
             <div class="row">
               <label class="f" style="width:6rem">Scale ×<input type="number" id="scale" min="1" max="128" step="1" value="10"></label>
@@ -597,7 +884,7 @@
               the scale only sets its default width/height.</p>
           </section>
 
-          <section class="card projects-card">
+          <section class="card sheet projects-card" data-sheet="saved">
             <h3>Saved in this browser <span class="meta" id="storageInfo"></span></h3>
             <div class="row">
               <input type="text" id="projName" class="grow" placeholder="Project name" maxlength="80">
@@ -615,6 +902,17 @@
       </div>
     </div>
   </main>
+
+  <!-- Phone-only bottom navigation: each tab opens a bottom sheet -->
+  <nav class="tabbar" id="tabbar" aria-label="Panels">
+    <button data-open="import"><span>📂</span>Import</button>
+    <button data-open="grid"><span>▦</span>Grid</button>
+    <button data-open="palette"><span>🎨</span>Palette</button>
+    <button data-open="reduce"><span>🎚️</span>Reduce</button>
+    <button data-open="export"><span>⬇️</span>Export</button>
+    <button data-open="saved"><span>💾</span>Saved</button>
+  </nav>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script>
     'use strict';
@@ -1045,6 +1343,7 @@
       srcData = c.getImageData(0, 0, srcCanvas.width, srcCanvas.height);
       srcName = (name || 'pixel-art').replace(/\.[^.]+$/, '') || 'pixel-art';
       srcBlob = blob || null;
+      closeSheet();
       undoStack = []; redoStack = [];
       $('detectBtn').disabled = false;
       $('srcWrap').style.display = 'block';
@@ -1060,6 +1359,7 @@
       const el = $('detectStatus');
       el.textContent = msg;
       el.className = 'status' + (cls ? ' ' + cls : '');
+      if (openSheetName !== 'grid' && !/…$/.test(msg) && !msg.startsWith('Manual grid')) toast(msg, cls);
     }
 
     function setGridInputs(g) {
@@ -1123,6 +1423,7 @@
 
     function newBlank(w, h) {
       if (px) beginEdit();
+      closeSheet();
       currentId = null;
       dirty = true;
       $('projName').value = 'untitled';
@@ -1219,10 +1520,13 @@
     const off = document.createElement('canvas'), octx = off.getContext('2d');
     let offImg = null;
 
+    const phone = matchMedia('(max-width: 860px)');
+
     function fitZoom() {
       if (!W) return;
       const wrap = $('editorWrap');
-      const aw = (wrap.clientWidth || 600) - 8, ah = Math.max(240, window.innerHeight * 0.7) - 8;
+      const aw = (wrap.clientWidth || 600) - 8;
+      const ah = (phone.matches ? wrap.clientHeight || 300 : Math.max(240, window.innerHeight * 0.7)) - 8;
       zoom = Math.max(1, Math.min(64, Math.floor(Math.min(aw / W, ah / H))));
     }
 
@@ -1297,8 +1601,17 @@
 
     function setBrush(v) {
       brush = v;
-      $('brushColor').value = hex(v);
+      if (v) $('brushColor').value = hex(v);
+      updateBrushChip();
       markPaletteSelection();
+    }
+
+    // brush === 0 means "paint transparent" (picked from the quick palette).
+    function updateBrushChip() {
+      const chip = $('brushChip');
+      chip.classList.toggle('checker', !brush);
+      chip.style.backgroundColor = brush ? hex(brush) : '';
+      chip.title = brush ? `Brush color ${hex(brush)}` : 'Brush: transparent';
     }
 
     // ---------------------------------------------------------------
@@ -1324,6 +1637,7 @@
         frag.appendChild(b);
       }
       pal.appendChild(frag);
+      renderQuickPalette(counts);
       markPaletteSelection();
 
       const k = $('kSlider');
@@ -1343,7 +1657,38 @@
       }
     }
 
+    // Phone thumb-zone strip: transparent + every palette color, horizontally scrollable.
+    function renderQuickPalette(counts) {
+      const q = $('quickPal');
+      q.innerHTML = '';
+      const none = document.createElement('button');
+      none.className = 'sw none checker';
+      none.dataset.v = 0;
+      none.title = 'Transparent';
+      none.setAttribute('aria-label', 'Transparent');
+      q.appendChild(none);
+      for (const [v] of counts.slice(0, MAX_SWATCHES)) {
+        const b = document.createElement('button');
+        b.className = 'sw';
+        b.style.background = hex(v);
+        b.dataset.v = v;
+        b.setAttribute('aria-label', hex(v));
+        q.appendChild(b);
+      }
+      if (!counts.length) {
+        const h = document.createElement('span');
+        h.className = 'empty-hint';
+        h.textContent = px ? 'Pick a brush color →' : 'Colors appear here';
+        q.appendChild(h);
+      }
+    }
+
     function markPaletteSelection() {
+      for (const b of $('quickPal').querySelectorAll('.sw')) {
+        const v = +b.dataset.v;
+        b.classList.toggle('active', merging ? v === activeColor : false);
+        b.classList.toggle('brush', v === brush);
+      }
       for (const b of $('palette').children) {
         const v = +b.dataset.v;
         b.classList.toggle('active', v === activeColor);
@@ -1363,10 +1708,37 @@
       for (let i = 0; i < px.length; i++) if (px[i] === from) px[i] = to;
     }
 
+    // Quick strip: tap = brush color, long-press = open the palette sheet with that color selected.
+    let lpTimer = 0, lpFired = false;
+    $('quickPal').addEventListener('pointerdown', e => {
+      const b = e.target.closest('.sw');
+      lpFired = false;
+      clearTimeout(lpTimer);
+      if (!b || !+b.dataset.v) return;
+      lpTimer = setTimeout(() => {
+        lpFired = true;
+        if (navigator.vibrate) navigator.vibrate(15);
+        selectColor(+b.dataset.v);
+        openSheet('palette');
+      }, 450);
+    });
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) $('quickPal').addEventListener(ev, () => clearTimeout(lpTimer));
+    $('quickPal').addEventListener('scroll', () => clearTimeout(lpTimer), { passive: true });
+    $('quickPal').addEventListener('contextmenu', e => e.preventDefault());
+    $('quickPal').addEventListener('click', e => {
+      const b = e.target.closest('.sw');
+      if (!b || lpFired) { lpFired = false; return; }
+      const v = +b.dataset.v;
+      if (!v) { setMerging(false); setBrush(0); toast('Brush: transparent'); return; }
+      onSwatchTap(v);
+    });
+
     $('palette').addEventListener('click', e => {
       const b = e.target.closest('.sw');
-      if (!b) return;
-      const v = +b.dataset.v;
+      if (b) onSwatchTap(+b.dataset.v);
+    });
+
+    function onSwatchTap(v) {
       if (merging) {
         setMerging(false);
         if (activeColor !== null && v !== activeColor) {
@@ -1375,20 +1747,25 @@
           activeColor = v;
           setBrush(v);
           afterChange();
+          toast(`Merged into ${hex(v)}`);
         }
         return;
       }
       selectColor(v);
-    });
+    }
 
     function setMerging(on) {
       merging = on;
       document.body.classList.toggle('merging', on);
       $('mergeBtn').classList.toggle('on', on);
-      $('mergeBtn').textContent = on ? 'Click target swatch…' : 'Merge into…';
+      $('mergeBtn').textContent = on ? 'Tap target swatch…' : 'Merge into…';
+      markPaletteSelection();
     }
 
-    $('mergeBtn').addEventListener('click', () => setMerging(!merging));
+    $('mergeBtn').addEventListener('click', () => {
+      setMerging(!merging);
+      if (merging && phone.matches) toast('Tap the color to merge into');
+    });
 
     $('toBrushBtn').addEventListener('click', () => {
       if (activeColor === null || activeColor === brush) return;
@@ -1420,6 +1797,7 @@
       activeColor = v;
       brush = v;
       $('brushColor').value = hex(v);
+      updateBrushChip();
       $('activeHex').textContent = hex(v);
       render();
     });
@@ -1690,7 +2068,7 @@
       if (mod || e.altKey) return;
       const tools = { b: 'pencil', e: 'eraser', g: 'fill', r: 'replace', i: 'picker', h: 'hand' };
       if (tools[k]) setTool(tools[k]);
-      else if (k === 'escape' && merging) setMerging(false);
+      else if (k === 'escape') { if (merging) setMerging(false); else closeSheet(); }
     });
 
     // ---------------------------------------------------------------
@@ -1767,6 +2145,8 @@
     $('drop').addEventListener('click', () => $('file').click());
     $('file').addEventListener('change', e => { loadFile(e.target.files[0]); e.target.value = ''; });
     $('sampleBtn').addEventListener('click', loadSample);
+    $('emptySample').addEventListener('click', loadSample);
+    $('emptyChoose').addEventListener('click', () => $('file').click());
     $('blankBtn').addEventListener('click', () => newBlank(32, 32));
 
     let dragDepth = 0;
@@ -1901,6 +2281,7 @@
       const el = $('projStatus');
       el.textContent = msg;
       el.className = 'status' + (cls ? ' ' + cls : '');
+      if (openSheetName !== 'saved') toast(msg, cls);
     }
 
     const storageError = err => setProjStatus(
@@ -1965,6 +2346,7 @@
     }
 
     function restorePixels(p) {
+      closeSheet();
       W = p.W; H = p.H;
       px = new Uint32Array(p.pixels.slice(0));
       undoStack = []; redoStack = [];
@@ -2067,12 +2449,79 @@
     $('saveAsBtn').addEventListener('click', () => saveProject(true));
     $('projName').addEventListener('keydown', e => { if (e.key === 'Enter') saveProject(false); });
 
+    // ---------------------------------------------------------------
+    // Phone shell: bottom sheets, measured so the canvas shrinks to fit
+    // above an open sheet while the tools stay in the thumb zone.
+    // ---------------------------------------------------------------
+    let openSheetName = null;
+    const sheets = [...document.querySelectorAll('.sheet')];
+    const rootStyle = document.documentElement.style;
+
+    for (const sh of sheets) {
+      const head = sh.matches('details') ? sh.querySelector('summary') : sh.querySelector('h3');
+      const x = document.createElement('button');
+      x.className = 'sheet-close';
+      x.type = 'button';
+      x.textContent = '✕';
+      x.setAttribute('aria-label', 'Close panel');
+      x.addEventListener('click', e => { e.preventDefault(); closeSheet(); });
+      head.appendChild(x);
+    }
+
+    const sheetObserver = new ResizeObserver(() => {
+      const open = sheets.find(s => s.classList.contains('open'));
+      rootStyle.setProperty('--sheet-h', open && phone.matches ? open.offsetHeight + 'px' : '0px');
+    });
+    const toolsObserver = new ResizeObserver(() => {
+      rootStyle.setProperty('--tools-h', ($('toolbar').offsetHeight + $('quickPal').offsetHeight) + 'px');
+    });
+    toolsObserver.observe($('toolbar'));
+    toolsObserver.observe($('quickPal'));
+
+    function openSheet(name) {
+      if (!phone.matches) return;
+      if (openSheetName === name) { closeSheet(); return; }
+      closeSheet();
+      const sh = sheets.find(s => s.dataset.sheet === name);
+      if (!sh) return;
+      if (sh.matches('details')) sh.open = true;
+      sh.classList.add('open');
+      document.body.classList.add('sheet-open');
+      sh.scrollTop = 0;
+      openSheetName = name;
+      sheetObserver.observe(sh);
+      document.querySelectorAll('[data-open]').forEach(b => b.classList.toggle('on', b.dataset.open === name));
+      if (name === 'grid') drawSource();
+    }
+
+    function closeSheet() {
+      for (const sh of sheets) { sh.classList.remove('open'); sheetObserver.unobserve(sh); }
+      openSheetName = null;
+      document.body.classList.remove('sheet-open');
+      rootStyle.setProperty('--sheet-h', '0px');
+      document.querySelectorAll('[data-open]').forEach(b => b.classList.remove('on'));
+    }
+
+    document.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => openSheet(b.dataset.open)));
+    phone.addEventListener('change', () => { closeSheet(); fitZoom(); render(); drawSource(); });
+
+    let toastTimer = 0;
+    function toast(msg, cls) {
+      if (!phone.matches) return;
+      const t = $('toast');
+      t.textContent = msg;
+      t.className = 'toast show' + (cls === 'warn' ? ' warn' : '');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => t.classList.remove('show'), msg.length > 60 ? 4200 : 2400);
+    }
+
     let resizeTimer = 0;
     window.addEventListener('resize', () => {
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(drawSource, 100);
     });
 
+    updateBrushChip();
     afterChange();
     renderProjects();
   </script>
