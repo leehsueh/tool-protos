@@ -158,7 +158,7 @@
 
       <h2>Technical details</h2>
       <p>The patch outline is built as a polygon (rounded rectangle, ellipse, shield or hexagon) and the base is a straight extrusion of it, triangulated as a fan since every shape is convex. The artwork is rasterised onto a grid at the chosen resolution with a canvas (<code>ctx.filter = blur()</code> for smoothing), then thresholded or, in multi-color mode, reduced in two stages. Stage 1 reads the image at up to 512 px, bins near-identical colors, and runs weighted k-means (k-means++ seeding with a fixed seed, so the palette is repeatable) in CIELAB, where straight-line distance (ΔE) follows how different two colors look rather than how far apart their RGB numbers are. It runs once per image, so the palette doesn't shift as you move or scale the art. Stage 2 auto-groups those colors into filaments: the color hugging the image edges, plus anything within ΔE 20 of it, becomes the flat base (or the transparency does, for images with alpha), and the remaining artwork colors are clustered by size-weighted k-means into the raised filaments, largest first. Each grid cell takes its nearest detected color by ΔE, then that color's filament. The grid is clipped using a signed-distance field of the outline, then a connected-component pass merges any region smaller than the speck size into the label it borders most.</p>
-      <p>The raised layer is meshed directly from the grid: top/bottom faces are merged into per-row runs, and side walls are emitted only where an "on" cell meets an "off" one. Each run's edges get extra vertices wherever the neighbouring row changes, and it is triangulated as a zipper strip between them, so the mesh has no T-junctions. Hand-painted strokes are stored as polylines in patch millimetres and applied on top of the cached automatic result, so painting only re-runs the cheap part of the pipeline. The thin-detail check is a morphological opening of each printed part with a disc of the minimum width, computed with chamfer distance transforms on a 2× supersampled grid; cells the opening removes, beyond one grid cell of slack for stair-stepped edges, are highlighted. Each color is meshed as its own part; in stacked mode, part <em>k</em> is every cell at least <em>k</em> high. Cells of a part that touch only at a corner are bridged, so the exported mesh is watertight and manifold with no slicer repair needed. Projects are stored in IndexedDB: each record holds the control values, patch rotation, filament mapping, stroke polylines, a PNG thumbnail and the original image as a <code>Blob</code>. Colour detection is deterministic (fixed seed), so the saved mapping lines up with the reopened image's palette. The page asks for persistent storage on first save so the browser doesn't evict saved work. Exports are written in-browser: binary STL via <code>DataView</code>, and 3MF as a hand-built uncompressed ZIP (with CRC-32) containing one mesh object per color, joined as components of a single object, with a <code>basematerials</code> color per part. No libraries, nothing uploaded.</p>
+      <p>The raised layer is meshed directly from the grid: top/bottom faces are merged into per-row runs, and side walls are emitted only where an "on" cell meets an "off" one. Each run's edges get extra vertices wherever the neighbouring row changes, and it is triangulated as a zipper strip between them, so the mesh has no T-junctions. Hand-painted strokes are stored as polylines in patch millimetres and applied on top of the cached automatic result, so painting only re-runs the cheap part of the pipeline. The thin-detail check is a morphological opening of each printed part with a disc of the minimum width, computed with chamfer distance transforms on a 2× supersampled grid; cells the opening removes, beyond one grid cell of slack for stair-stepped edges, are highlighted. Each color is meshed as its own part; in stacked mode, part <em>k</em> is every cell at least <em>k</em> high. Cells of a part that touch only at a corner are bridged, so the exported mesh is watertight and manifold with no slicer repair needed. Projects are stored in the IndexedDB database <code>tool-protos/hook-loop-patch-maker</code> (prefixed because every repo on the account shares one GitHub Pages origin): each record holds the control values, patch rotation, filament mapping, stroke polylines, a PNG thumbnail and the original image as a <code>Blob</code>. Colour detection is deterministic (fixed seed), so the saved mapping lines up with the reopened image's palette. The page asks for persistent storage on first save so the browser doesn't evict saved work. Exports are written in-browser: binary STL via <code>DataView</code>, and 3MF as a hand-built uncompressed ZIP (with CRC-32) containing one mesh object per color, joined as components of a single object, with a <code>basematerials</code> color per part. No libraries, nothing uploaded.</p>
     </div>
   </details>
 
@@ -1599,19 +1599,49 @@ ${objs}
     // Each project keeps every control setting, the patch rotation, the colour → filament
     // mapping, the painted strokes, a thumbnail, and the source image file itself (as a Blob),
     // so it reopens exactly as it was saved. Nothing leaves the browser.
-    const DB_NAME = 'hook-loop-patch-maker', STORE = 'projects';
+    // GitHub Pages serves every repo of an account from one origin, so storage names carry
+    // a "tool-protos/" prefix to stay clear of other repos' pages and the other experiments.
+    const DB_NAME = 'tool-protos/hook-loop-patch-maker', LEGACY_DB_NAME = 'hook-loop-patch-maker', STORE = 'projects';
     let dbPromise = null;
     let currentId = null, savedSnap = null;
     let pendingMap = null; // colour mapping to re-apply once the reopened image's palette is detected
 
+    // createIfMissing = false opens an existing database only: aborting the upgrade of a
+    // brand-new one stops the browser from creating it.
+    function idbOpen(name, createIfMissing) {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(name, 1);
+        req.onupgradeneeded = e => {
+          if (!createIfMissing && e.oldVersion === 0) { req.transaction.abort(); return; }
+          req.result.createObjectStore(STORE, { keyPath: 'id', autoIncrement: true });
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => (createIfMissing ? reject(req.error) : resolve(null));
+      });
+    }
+
+    // One-time move of projects saved under the old, un-prefixed database name.
+    async function migrateLegacy(db) {
+      const old = await idbOpen(LEGACY_DB_NAME, false);
+      if (!old) return;
+      const records = await new Promise((resolve, reject) => {
+        const req = old.transaction(STORE, 'readonly').objectStore(STORE).getAll();
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      await new Promise((resolve, reject) => {
+        const t = db.transaction(STORE, 'readwrite'), st = t.objectStore(STORE);
+        for (const r of records) { delete r.id; st.add(r); }
+        t.oncomplete = resolve;
+        t.onerror = () => reject(t.error);
+      });
+      old.close();
+      indexedDB.deleteDatabase(LEGACY_DB_NAME);
+    }
+
     function openDB() {
       if (!dbPromise) {
-        dbPromise = new Promise((resolve, reject) => {
-          const req = indexedDB.open(DB_NAME, 1);
-          req.onupgradeneeded = () => req.result.createObjectStore(STORE, { keyPath: 'id', autoIncrement: true });
-          req.onsuccess = () => resolve(req.result);
-          req.onerror = () => reject(req.error);
-        });
+        dbPromise = idbOpen(DB_NAME, true).then(db => migrateLegacy(db).catch(() => {}).then(() => db));
         dbPromise.catch(() => { dbPromise = null; });
       }
       return dbPromise;

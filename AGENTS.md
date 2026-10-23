@@ -44,3 +44,15 @@ load.
 
 GitHub Actions (`.github/workflows/deploy.yml`) deploys the repo root to
 GitHub Pages on every push to `main`. No configuration needed.
+
+---
+
+## Browser storage
+
+GitHub Pages serves every repo of the account from one origin
+(`leehsueh.github.io`), so IndexedDB, `localStorage`, Cache Storage and cookies
+are shared with all other experiments **and** all other repos' pages. Name
+everything with a `tool-protos/<experiment-name>` prefix, e.g. IndexedDB
+database `tool-protos/image-to-pixel-art`, or `localStorage` key
+`tool-protos/hook-loop-patch-maker/settings`. If you rename an existing
+store, migrate the old data (see `migrateLegacy` in either experiment).
