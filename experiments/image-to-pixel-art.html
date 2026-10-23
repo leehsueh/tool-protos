@@ -850,12 +850,11 @@
                 <span class="hint" id="activeCount"></span>
               </div>
               <div class="row">
-                <button id="mergeBtn" title="Then click the swatch to merge into">Merge into…</button>
-                <button id="toBrushBtn">Replace with brush</button>
-                <button id="clearColorBtn">Make transparent</button>
+                <label class="chk"><input type="checkbox" id="highlight"> Highlight where used</label>
               </div>
               <div class="row">
-                <label class="chk"><input type="checkbox" id="highlight"> Highlight where used</label>
+                <button id="mergeBtn" title="Then click the swatch to merge into">Merge into…</button>
+                <button id="clearColorBtn">Make transparent</button>
               </div>
               <p class="hint" style="margin-top:0.4rem">Use the color box above to recolor all pixels of this color at once.</p>
             </div>
@@ -1766,14 +1765,6 @@
     $('mergeBtn').addEventListener('click', () => {
       setMerging(!merging);
       if (merging && phone.matches) toast('Tap the color to merge into');
-    });
-
-    $('toBrushBtn').addEventListener('click', () => {
-      if (activeColor === null || activeColor === brush) return;
-      beginEdit();
-      replaceAll(activeColor, brush);
-      activeColor = brush;
-      afterChange();
     });
 
     $('clearColorBtn').addEventListener('click', () => {
