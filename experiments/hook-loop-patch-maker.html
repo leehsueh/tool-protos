@@ -83,7 +83,17 @@
     .drop strong { color: #58a6ff; }
 
     .preview-wrap { position: sticky; top: 1rem; }
-    #preview { width: 100%; display: block; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; }
+    #preview { width: 100%; display: block; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; touch-action: pan-y; }
+    #preview.editing { touch-action: none; cursor: none; border-color: #58a6ff; }
+    .edit-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-bottom: 0.5rem; font-size: 0.82rem; color: #8b949e; }
+    .edit-bar button { padding: 0.35rem 0.6rem; }
+    .edit-bar button:disabled { opacity: 0.4; cursor: default; border-color: #30363d; }
+    .edit-bar input[type=range] { flex: 1; min-width: 90px; accent-color: #58a6ff; }
+    .edit-bar input[type=number] { width: 4.2em; background: #0d1117; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px; padding: 0.25rem 0.35rem; font: inherit; }
+    #brushSlots { display: flex; gap: 4px; }
+    #brushSlots .bslot { width: 34px; height: 30px; padding: 0; font-weight: 700; font-size: 0.78rem; border: 2px solid transparent; opacity: 0.45; }
+    #brushSlots .bslot.on { opacity: 1; border-color: #58a6ff; }
+    #brushSlots .bslot[data-slot="-1"] { background: #21262d; color: #e6edf3; }
     .stats { font-size: 0.82rem; color: #8b949e; margin-top: 0.6rem; line-height: 1.7; }
     .stats b { color: #c9d1d9; font-weight: 600; }
     .exports { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.8rem; }
@@ -127,6 +137,8 @@
         <li>Hover a detected color (or tap its swatch) to highlight where it sits on the patch. Switch the preview to <strong>Detected colors</strong> to check the stage-1 result before filament mapping. "Use detected colors as filament colors" copies each filament's largest detected color into its swatch.</li>
         <li>Or raise a single color: dark areas, light areas, or everything non-transparent (best for logos with transparent backgrounds), and pick which filament it uses. Tune smoothing and speck removal until the preview looks clean.</li>
         <li><strong>Landscape / Portrait</strong> swaps the patch's width and height (and is remembered when you pick another preset). <strong>Rotate patch</strong> turns the whole thing 90° — outline and artwork together, e.g. a shield pointing sideways. <strong>Rotate art</strong> spins only the artwork inside the patch, by any angle or in 90° steps.</li>
+        <li><strong>Thin detail</strong> narrower than the minimum width (default 0.8 mm ≈ two 0.4 mm nozzle lines) is highlighted in pink on the preview. It may print badly or not at all.</li>
+        <li><strong>✏️ Paint</strong> lets you fix it by hand. Drag one finger (or the mouse) to paint with a filament: <strong>B</strong> removes raised material, <strong>2–4</strong> add it, and <strong>↺</strong> paints back the automatic result. Pinch with two fingers (or use the mouse wheel) to zoom and pan; shift-, right- or middle-drag pans with a mouse. <strong>Undo</strong> steps back, <strong>Clear edits</strong> removes everything (Undo brings it back), and <strong>Fit</strong> resets the zoom. Edits are kept in millimetres on the patch, so they survive changes to resolution, border and color mapping, but not a new image or moving the artwork.</li>
         <li>Optionally add a raised <strong>border</strong> in any filament color.</li>
         <li><strong>Color layout</strong>: <em>Flat</em> puts all raised colors at the same height, side by side. This needs a multi-material printer (AMS / MMU). <em>Stacked</em> makes Color 2, 3 and 4 progressively taller, so each color starts at its own height and a single-extruder printer can do it with filament changes. The Z heights to change at are listed under the preview.</li>
         <li><strong>3MF</strong> loads into Bambu Studio / OrcaSlicer / PrusaSlicer as one object with one part per color; assign a filament to each. You can also export one combined STL or a ZIP with one STL per color.</li>
@@ -135,7 +147,7 @@
 
       <h2>Technical details</h2>
       <p>The patch outline is built as a polygon (rounded rectangle, ellipse, shield or hexagon) and the base is a straight extrusion of it, triangulated as a fan since every shape is convex. The artwork is rasterised onto a grid at the chosen resolution with a canvas (<code>ctx.filter = blur()</code> for smoothing), then thresholded or, in multi-color mode, reduced in two stages. Stage 1 reads the image at up to 512 px, bins near-identical colors, and runs weighted k-means (k-means++ seeding with a fixed seed, so the palette is repeatable) in CIELAB, where straight-line distance (ΔE) follows how different two colors look rather than how far apart their RGB numbers are. It runs once per image, so the palette doesn't shift as you move or scale the art. Stage 2 auto-groups those colors into filaments: the color hugging the image edges, plus anything within ΔE 20 of it, becomes the flat base (or the transparency does, for images with alpha), and the remaining artwork colors are clustered by size-weighted k-means into the raised filaments, largest first. Each grid cell takes its nearest detected color by ΔE, then that color's filament. The grid is clipped using a signed-distance field of the outline, then a connected-component pass merges any region smaller than the speck size into the label it borders most.</p>
-      <p>The raised layer is meshed directly from the grid: top/bottom faces are merged into per-row runs, and side walls are emitted only where an "on" cell meets an "off" one. Each run's edges get extra vertices wherever the neighbouring row changes, and it is triangulated as a zipper strip between them, so the mesh has no T-junctions. Each color is meshed as its own part; in stacked mode, part <em>k</em> is every cell at least <em>k</em> high. Cells of a part that touch only at a corner are bridged, so the exported mesh is watertight and manifold with no slicer repair needed. Exports are written in-browser: binary STL via <code>DataView</code>, and 3MF as a hand-built uncompressed ZIP (with CRC-32) containing one mesh object per color, joined as components of a single object, with a <code>basematerials</code> color per part. No libraries, nothing uploaded.</p>
+      <p>The raised layer is meshed directly from the grid: top/bottom faces are merged into per-row runs, and side walls are emitted only where an "on" cell meets an "off" one. Each run's edges get extra vertices wherever the neighbouring row changes, and it is triangulated as a zipper strip between them, so the mesh has no T-junctions. Hand-painted strokes are stored as polylines in patch millimetres and applied on top of the cached automatic result, so painting only re-runs the cheap part of the pipeline. The thin-detail check is a morphological opening of each printed part with a disc of the minimum width, computed with chamfer distance transforms on a 2× supersampled grid; cells the opening removes, beyond one grid cell of slack for stair-stepped edges, are highlighted. Each color is meshed as its own part; in stacked mode, part <em>k</em> is every cell at least <em>k</em> high. Cells of a part that touch only at a corner are bridged, so the exported mesh is watertight and manifold with no slicer repair needed. Exports are written in-browser: binary STL via <code>DataView</code>, and 3MF as a hand-built uncompressed ZIP (with CRC-32) containing one mesh object per color, joined as components of a single object, with a <code>basematerials</code> color per part. No libraries, nothing uploaded.</p>
     </div>
   </details>
 
@@ -278,7 +290,28 @@
           <button type="button" id="viewFil" title="Show the patch in filament colors">Filament preview</button>
           <button type="button" id="viewDet" title="Show the image reduced to the detected colors, before mapping to filaments">Detected colors</button>
         </div>
+        <div class="edit-bar">
+          <button type="button" id="editToggle" aria-pressed="false" title="Paint on the patch with your finger or mouse">✏️ Paint</button>
+          <button type="button" id="undoEdit" title="Undo last stroke">↶ Undo</button>
+          <button type="button" id="clearEdit" title="Remove all painted strokes">Clear edits</button>
+          <button type="button" id="fitView" title="Reset zoom and pan">⤢ Fit</button>
+          <span id="editInfo"></span>
+        </div>
+        <div class="edit-bar hidden" id="brushRow">
+          <span id="brushSlots">
+            <button type="button" class="bslot" data-slot="0" title="Paint base: removes raised material">B</button>
+            <button type="button" class="bslot" data-slot="1" title="Paint Color 2">2</button>
+            <button type="button" class="bslot" data-slot="2" title="Paint Color 3">3</button>
+            <button type="button" class="bslot" data-slot="3" title="Paint Color 4">4</button>
+            <button type="button" class="bslot" data-slot="-1" title="Restore: paint back the automatic result">↺</button>
+          </span>
+          <label for="brush">Size</label><input type="range" id="brush" min="0.3" max="6" step="0.1" value="1"><span id="brushVal" style="min-width:3.5em"></span>
+        </div>
         <canvas id="preview"></canvas>
+        <div class="edit-bar" style="margin-top:0.5rem">
+          <label class="check"><input type="checkbox" id="thinOn" checked> Highlight raised detail narrower than</label>
+          <input type="number" id="thinMin" value="0.8" min="0.2" max="4" step="0.1"> mm
+        </div>
         <div class="stats" id="stats"></div>
         <div class="row" style="margin-top:0.8rem"><label for="fname" style="flex:0 0 auto">File name</label><input type="text" id="fname" value="patch"></div>
         <div class="exports">
@@ -336,7 +369,7 @@
       radius: v => v + ' mm', threshold: v => v, blur: v => (+v).toFixed(2) + ' mm',
       speck: v => (+v).toFixed(1) + ' mm²', scale: v => v + '%', offX: v => v + '%', offY: v => v + '%',
       margin: v => v + ' mm', rim: v => (+v ? (+v).toFixed(1) + ' mm' : 'off'),
-      baseT: v => (+v).toFixed(1) + ' mm', relief: v => (+v).toFixed(1) + ' mm', k: v => v, artRot: v => v + '°',
+      baseT: v => (+v).toFixed(1) + ' mm', relief: v => (+v).toFixed(1) + ' mm', k: v => v, artRot: v => v + '°', brush: v => (+v).toFixed(1) + ' mm',
     };
     let patchRot = 0;     // whole-patch rotation, degrees clockwise (0/90/180/270)
     let orientPref = null; // 'landscape' | 'portrait' once the user picks one
@@ -658,6 +691,10 @@
     // Tint the mapping buttons with the current filament colours and mark each row's choice.
     function paintSlotButtons() {
       const colors = [0, 1, 2, 3].map(i => $('color' + i).value);
+      document.querySelectorAll('#brushSlots .bslot').forEach(b => {
+        const v = +b.dataset.slot;
+        if (v >= 0) { b.style.background = colors[v]; b.style.color = textOn(colors[v]); }
+      });
       document.querySelectorAll('#mapHeads span').forEach((h, v) => { h.style.background = colors[v]; h.style.color = textOn(colors[v]); });
       document.querySelectorAll('#clusterList .cmap-row').forEach((row, i) => {
         row.querySelectorAll('.slot').forEach(b => {
@@ -744,7 +781,6 @@
           if (d <= inBase && d > inBase - s.rim) design[n] = s.rimSlot;
         }
       }
-      fixDiagonals(design, nx, ny, sdf, inBase, s.stack === 'stacked');
       return { design, clusterIdx };
     }
 
@@ -997,6 +1033,100 @@ ${objs}
       return new Blob([...parts, ...central, end.buffer]);
     }
 
+    // ---------- Hand edits (paint on the preview) ----------
+    // Strokes live in patch millimetres (y up), not grid cells, so they survive changes to
+    // resolution, border and colour mapping. They're applied on top of the automatic result.
+    // slot: 0 = base (removes raised material), 1..3 = Color 2..4, -1 = restore automatic result.
+    let edits = [], clearedEdits = null, stroke = null;
+    let editMode = false, brushSlot = 1;
+    const view = { zoom: 1, panX: 0, panY: 0 };
+    let geom = null;    // last preview mapping: { ox, oy, k, cssW, cssH }
+    let cursor = null;  // brush cursor position in CSS px
+    let autoCache = { key: '' };
+
+    function applyEdits(design, auto, s, G) {
+      const { nx, ny, cx, cy, sdf } = G;
+      const inBase = -0.71 * Math.max(cx, cy);
+      for (const st of edits) {
+        const r2 = st.r * st.r;
+        const pts = st.pts.length === 1 ? [st.pts[0], st.pts[0]] : st.pts;
+        for (let q = 1; q < pts.length; q++) {
+          const [ax, ay] = pts[q - 1], [bx, by] = pts[q];
+          const ex = bx - ax, ey = by - ay, ee = ex * ex + ey * ey || 1;
+          const i0 = Math.max(0, Math.floor((Math.min(ax, bx) - st.r + s.W / 2) / cx));
+          const i1 = Math.min(nx - 1, Math.ceil((Math.max(ax, bx) + st.r + s.W / 2) / cx));
+          const j0 = Math.max(0, Math.floor((s.H / 2 - Math.max(ay, by) - st.r) / cy));
+          const j1 = Math.min(ny - 1, Math.ceil((s.H / 2 - Math.min(ay, by) + st.r) / cy));
+          for (let j = j0; j <= j1; j++) {
+            const py = s.H / 2 - (j + 0.5) * cy;
+            for (let i = i0; i <= i1; i++) {
+              const px = -s.W / 2 + (i + 0.5) * cx;
+              const t = Math.max(0, Math.min(1, ((px - ax) * ex + (py - ay) * ey) / ee));
+              const dx = px - ax - ex * t, dy = py - ay - ey * t;
+              if (dx * dx + dy * dy > r2) continue;
+              const n = j * nx + i;
+              if (st.slot < 0) design[n] = auto[n];
+              else if (st.slot === 0) design[n] = 0;
+              else if (sdf[n] <= inBase) design[n] = st.slot;
+            }
+          }
+        }
+      }
+    }
+
+    // Thin-feature check: a morphological opening of each printed part with a disc of the
+    // minimum width. Cells the opening removes are narrower than that width. It runs on a 2×
+    // supersampled grid so even widths (e.g. 4 cells = 0.8 mm) are measured exactly.
+    function thinAreas(design, s, G, minW) {
+      const { nx, ny, cx } = G, U = 2, sx = nx * U, sy = ny * U, M = sx * sy;
+      const R = minW / 2 / (cx / U);
+      const thin = new Uint8Array(nx * ny);
+      const inSub = new Uint8Array(M), dist = new Float32Array(M), d2 = new Float32Array(M);
+      const stacked = s.stack === 'stacked';
+      for (let k = 1; k <= 3; k++) {
+        const inPart = partMask(stacked, k);
+        let any = false;
+        for (let j = 0; j < sy; j++) for (let i = 0; i < sx; i++) {
+          const v = inPart(design[(j >> 1) * nx + (i >> 1)]) ? 1 : 0;
+          inSub[j * sx + i] = v; if (v) any = true;
+        }
+        if (!any) continue;
+        for (let m = 0; m < M; m++) dist[m] = inSub[m] ? Infinity : 0;
+        chamfer(dist, sx, sy, 0);                    // depth inside the part
+        for (let m = 0; m < M; m++) d2[m] = inSub[m] && dist[m] >= R ? 0 : Infinity;
+        chamfer(d2, sx, sy, Infinity);               // distance to the eroded core
+        for (let j = 0; j < sy; j += U) for (let i = 0; i < sx; i += U) {
+          const m = j * sx + i;
+          // one grid cell of slack, so the stair-steps of slanted edges aren't reported
+          if (inSub[m] && d2[m] > R + U) thin[(j >> 1) * nx + (i >> 1)] = 1;
+        }
+      }
+      return thin;
+    }
+
+    // Two-pass 8-neighbour chamfer distance transform, in place. `outside` is the value
+    // assumed beyond the grid edge.
+    function chamfer(d, w, h, outside) {
+      const D = Math.SQRT2;
+      const at = (i, j) => (i < 0 || j < 0 || i >= w || j >= h) ? outside : d[j * w + i];
+      for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+        const n = j * w + i;
+        if (d[n] === 0) continue;
+        d[n] = Math.min(d[n], at(i - 1, j) + 1, at(i, j - 1) + 1, at(i - 1, j - 1) + D, at(i + 1, j - 1) + D);
+      }
+      for (let j = h - 1; j >= 0; j--) for (let i = w - 1; i >= 0; i--) {
+        const n = j * w + i;
+        if (d[n] === 0) continue;
+        d[n] = Math.min(d[n], at(i + 1, j) + 1, at(i, j + 1) + 1, at(i + 1, j + 1) + D, at(i - 1, j + 1) + D);
+      }
+    }
+
+    function autoKey(s) {
+      const src = sourceMode === 'text' ? 'text|' + $('text').value + '|' + $('font').value : 'img|' + imageId;
+      const settings = JSON.stringify(s, (k, v) => ['colors', 'stack', 'baseT', 'relief'].includes(k) ? undefined : v);
+      return settings + '|' + src + '|' + (s.mode === 'colors' ? palette.key + '|' + palette.map.join(',') : '');
+    }
+
     // ---------- Preview ----------
     const preview = $('preview'), pctx = preview.getContext('2d');
     const cellCanvas = document.createElement('canvas'), cellCtx = cellCanvas.getContext('2d');
@@ -1008,15 +1138,17 @@ ${objs}
       const dpr = window.devicePixelRatio || 1;
       const cssW = preview.clientWidth || 600;
       const pad = 28;
-      const k = Math.min((cssW - 2 * pad) / s.W, 520 / s.H);
-      const cssH = Math.round(s.H * k + 2 * pad);
+      const fitK = Math.min((cssW - 2 * pad) / s.W, 520 / s.H);
+      const cssH = Math.round(s.H * fitK + 2 * pad);
+      const k = fitK * view.zoom;
       preview.style.height = cssH + 'px';
       preview.width = Math.round(cssW * dpr); preview.height = Math.round(cssH * dpr);
       const g = pctx;
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       g.clearRect(0, 0, cssW, cssH);
 
-      const ox = cssW / 2, oy = cssH / 2;
+      const ox = cssW / 2 + view.panX, oy = cssH / 2 + view.panY;
+      geom = { ox, oy, k, cssW, cssH };
       // 10 mm grid
       g.strokeStyle = '#161b22'; g.lineWidth = 1;
       for (let x = ox % (10 * k); x < cssW; x += 10 * k) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, cssH); g.stroke(); }
@@ -1072,7 +1204,21 @@ ${objs}
         paint(n => mine(n) ? palette.clusters[highlight].rgb : null, 0, 0);
       }
 
+      if (state && state.thin && state.thin.length === nx * ny) {
+        g.globalAlpha = 0.85;
+        paint(n => state.thin[n] ? [255, 40, 110] : null, 0, 0);
+        g.globalAlpha = 1;
+      }
+
       g.strokeStyle = 'rgba(255,255,255,0.15)'; g.lineWidth = 1; g.stroke(path);
+
+      if (editMode && cursor) {
+        const r = Math.max(2, (+$('brush').value / 2) * k);
+        g.lineWidth = 2; g.strokeStyle = 'rgba(0,0,0,0.7)';
+        g.beginPath(); g.arc(cursor.x, cursor.y, r, 0, Math.PI * 2); g.stroke();
+        g.lineWidth = 1; g.strokeStyle = '#fff';
+        g.beginPath(); g.arc(cursor.x, cursor.y, r, 0, Math.PI * 2); g.stroke();
+      }
 
       // dimension labels
       g.fillStyle = '#8b949e'; g.font = '12px system-ui, sans-serif'; g.textAlign = 'center';
@@ -1124,7 +1270,18 @@ ${objs}
         `<b>${s.W.toFixed(1)} × ${s.H.toFixed(1)} mm</b> (${(s.W / IN).toFixed(2)}″ × ${(s.H / IN).toFixed(2)}″) · ` +
         `total height <b>${height.toFixed(1)} mm</b> · raised coverage ${pct}%<br>` +
         `Colors: ${used.map(i => dot(i) + ' ' + SLOT_NAMES[i]).join(' &nbsp;')}<br>${plan}<br>` +
+        thinReport() +
         `Grid ${G.nx} × ${G.ny} cells at ${G.cx.toFixed(3)} mm`;
+    }
+
+    function thinReport() {
+      if (!state || !state.thin) return '';
+      let n = 0;
+      for (const v of state.thin) n += v;
+      if (!n) return `<span style="color:#3fb950">✓ No raised features narrower than ${state.minW} mm.</span><br>`;
+      const area = n * state.G.cx * state.G.cy;
+      return `<span style="color:#ff5c8a">■</span> <b>${area.toFixed(1)} mm²</b> of raised detail is narrower than ${state.minW} mm (pink). ` +
+        'Use <b>✏️ Paint</b> to thicken it, or raise Remove specks.<br>';
     }
 
     let pending = false;
@@ -1147,8 +1304,26 @@ ${objs}
         $('rimSlotRow').classList.toggle('hidden', !(s.rim > 0));
         $('reliefLabel').textContent = s.stack === 'stacked' ? 'Step per color' : 'Raised art';
         const G = gridFor(s);
-        const { design, clusterIdx } = rasterise(s, G);
-        state = { s, G, design, clusterIdx };
+        // the automatic result is cached so painting only re-applies the strokes
+        if (autoCache.key !== autoKey(s)) {
+          const res = rasterise(s, G);
+          autoCache = { key: autoKey(s), ...res };
+        }
+        const design = autoCache.design.slice(), clusterIdx = autoCache.clusterIdx;
+        applyEdits(design, autoCache.design, s, G);
+        fixDiagonals(design, G.nx, G.ny, G.sdf, -0.71 * Math.max(G.cx, G.cy), s.stack === 'stacked');
+        const minW = Math.max(0.1, parseFloat($('thinMin').value) || 0.8);
+        // skip the thin check mid-stroke (it's the slow part); it reruns when the finger lifts
+        const thin = $('thinOn').checked && !stroke ? thinAreas(design, s, G, minW) : null;
+        state = { s, G, design, clusterIdx, thin, minW };
+        $('editInfo').textContent = edits.length ? `${edits.length} stroke${edits.length > 1 ? 's' : ''}` : '';
+        $('undoEdit').disabled = !edits.length && !clearedEdits;
+        $('clearEdit').disabled = !edits.length;
+        $('brushRow').classList.toggle('hidden', !editMode);
+        $('editToggle').classList.toggle('active', editMode);
+        $('editToggle').setAttribute('aria-pressed', editMode);
+        preview.classList.toggle('editing', editMode);
+        document.querySelectorAll('#brushSlots .bslot').forEach(b => b.classList.toggle('on', +b.dataset.slot === brushSlot));
         $('viewSeg').classList.toggle('hidden', s.mode !== 'colors');
         $('viewFil').classList.toggle('active', previewMode === 'filaments');
         $('viewDet').classList.toggle('active', previewMode === 'detected');
@@ -1216,6 +1391,7 @@ ${objs}
         // SVGs without intrinsic size report 0 — fall back to a sensible raster size
         if (!img.naturalWidth) { img.width = 1000; img.height = 1000; }
         imageSource = img; imageId++;
+        edits = []; clearedEdits = null; view.zoom = 1; view.panX = view.panY = 0;
         $('fileName').textContent = file.name || 'Pasted image';
         if (file.name) $('fname').value = file.name.replace(/\.[^.]+$/, '');
         setSource('image');
@@ -1265,6 +1441,107 @@ ${objs}
     $('autoApply').onclick = regroup;
     $('viewFil').onclick = () => { previewMode = 'filaments'; render(); };
     $('viewDet').onclick = () => { previewMode = 'detected'; render(); };
+
+    // ---------- Paint, zoom and pan on the preview ----------
+    // One finger / left mouse paints (in Paint mode). Two fingers pinch-zoom and pan. The mouse
+    // wheel zooms; shift-, right- or middle-drag pans. Outside Paint mode, touch scrolls the page.
+    const pointers = new Map();
+    let pinch = null, panDrag = null;
+    const cssPt = e => { const r = preview.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+    const toMm = p => [(p.x - geom.ox) / geom.k, -(p.y - geom.oy) / geom.k];
+    const redrawPreview = () => { if (state) drawPreview(state.s, state.G, state.design, state.clusterIdx); };
+    // zoom so the patch point under p stays under p
+    function zoomAround(p, m, fitK, zoom) {
+      view.zoom = Math.max(1, Math.min(16, zoom));
+      const k = fitK * view.zoom;
+      view.panX = p.x - m[0] * k - geom.cssW / 2;
+      view.panY = p.y + m[1] * k - geom.cssH / 2;
+      if (view.zoom === 1) view.panX = view.panY = 0;
+    }
+    const midOf = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+
+    preview.addEventListener('pointerdown', e => {
+      if (!geom || (e.pointerType !== 'mouse' && !editMode)) return;
+      const p = cssPt(e);
+      pointers.set(e.pointerId, p);
+      preview.setPointerCapture(e.pointerId);
+      if (pointers.size === 2) {
+        if (stroke) { edits.pop(); stroke = null; } // a second finger means pinch, not paint
+        const [a, b] = [...pointers.values()];
+        pinch = { d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, z0: view.zoom, fitK: geom.k / view.zoom, m: toMm(midOf(a, b)) };
+        render();
+        return;
+      }
+      if (pointers.size > 2) return;
+      if (!editMode || e.button === 1 || e.button === 2 || e.shiftKey) {
+        if (view.zoom > 1) panDrag = { x: p.x, y: p.y, px: view.panX, py: view.panY };
+        return;
+      }
+      if (e.button !== 0) return;
+      e.preventDefault();
+      stroke = { slot: brushSlot, r: +$('brush').value / 2, pts: [toMm(p)] };
+      edits.push(stroke);
+      clearedEdits = null;
+      cursor = p;
+      render();
+    });
+
+    preview.addEventListener('pointermove', e => {
+      const p = cssPt(e);
+      if (editMode && e.pointerType === 'mouse') cursor = p;
+      if (pointers.has(e.pointerId)) pointers.set(e.pointerId, p);
+      if (pinch && pointers.size >= 2) {
+        const [a, b] = [...pointers.values()];
+        zoomAround(midOf(a, b), pinch.m, pinch.fitK, pinch.z0 * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d0);
+        redrawPreview();
+        return;
+      }
+      if (panDrag) {
+        view.panX = panDrag.px + p.x - panDrag.x; view.panY = panDrag.py + p.y - panDrag.y;
+        redrawPreview();
+        return;
+      }
+      if (stroke && pointers.has(e.pointerId)) {
+        cursor = p;
+        const q = toMm(p), last = stroke.pts[stroke.pts.length - 1];
+        if (Math.hypot(q[0] - last[0], q[1] - last[1]) >= stroke.r / 3) { stroke.pts.push(q); render(); }
+        else redrawPreview();
+        return;
+      }
+      if (editMode && e.pointerType === 'mouse') redrawPreview();
+    });
+
+    const endPointer = e => {
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinch = null;
+      if (pointers.size) return;
+      panDrag = null;
+      if (e.pointerType !== 'mouse' || e.type === 'pointerleave') cursor = null;
+      if (stroke) { stroke = null; render(); } else redrawPreview();
+    };
+    preview.addEventListener('pointerup', endPointer);
+    preview.addEventListener('pointercancel', endPointer);
+    preview.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && !pointers.size) { cursor = null; redrawPreview(); } });
+    preview.addEventListener('contextmenu', e => { if (editMode) e.preventDefault(); });
+    preview.addEventListener('wheel', e => {
+      // plain wheel scrolls the page unless painting or zoomed in; ctrl+wheel (trackpad pinch) always zooms
+      if (!editMode && view.zoom === 1 && !e.ctrlKey) return;
+      e.preventDefault();
+      const p = cssPt(e);
+      zoomAround(p, toMm(p), geom.k / view.zoom, view.zoom * Math.exp(-e.deltaY * 0.0015));
+      redrawPreview();
+    }, { passive: false });
+
+    $('editToggle').onclick = () => { editMode = !editMode; cursor = null; render(); };
+    document.querySelectorAll('#brushSlots .bslot').forEach(b => b.onclick = () => { brushSlot = +b.dataset.slot; render(); });
+    $('undoEdit').onclick = () => {
+      if (edits.length) edits.pop();
+      else if (clearedEdits) { edits = clearedEdits; clearedEdits = null; }
+      render();
+    };
+    $('clearEdit').onclick = () => { clearedEdits = edits; edits = []; render(); };
+    $('fitView').onclick = () => { view.zoom = 1; view.panX = view.panY = 0; redrawPreview(); };
+    ['brush', 'thinOn', 'thinMin'].forEach(id => $(id).addEventListener('input', render));
 
     $('matchColors').onclick = () => {
       for (let slot = 0; slot <= 3; slot++) {
