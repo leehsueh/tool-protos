@@ -530,7 +530,8 @@
         padding: 6px 10px 8px;
         background: #161b22;
       }
-      body.sheet-open .toolbar { display: none; }
+      /* With a panel open you're configuring, not painting: give its space to the canvas. */
+      body.sheet-open .toolbar, body.sheet-open .quick-pal { display: none; }
       .toolbar .tools-main, .toolbar .tools-sub { display: flex; gap: 6px; align-items: center; }
       .toolbar .tools-sub { order: 1; }
       .toolbar .tools-main { order: 2; }
@@ -695,7 +696,7 @@
         <li><strong>On a phone</strong> — the canvas fills the screen and everything sits in the thumb zone:
           tools along the bottom, a scrollable strip of the image's colors above them (tap = brush color,
           long-press = open it in the palette, the crossed swatch paints transparent), and a tab bar that
-          opens each panel as a bottom sheet. One finger draws; two fingers pan and pinch-zoom.</li>
+          opens each panel as a bottom sheet (tools and color strip tuck away while a panel is open). One finger draws; two fingers pan and pinch-zoom.</li>
         <li><strong>Save / open / delete</strong> — projects are kept in this browser only (nothing is uploaded).
           <em>Save</em> (<code>Ctrl/⌘+S</code>) updates the open project; <em>Save as new</em> makes a copy.
           Undo history is not saved. Clearing site data removes saved projects.</li>
