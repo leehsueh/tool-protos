@@ -719,6 +719,7 @@
           tapes…) or a custom size, choose Landscape/Portrait and set the corner radius, then <em>Resize canvas</em>.
           By default it keeps your pixels exactly as they are and only adds a transparent margin (or crops, with
           <em>Fill patch</em>) to reach the patch's proportions; <em>Set pixels per inch</em> rescales instead.
+          <em>Margin</em> adds space around the image (live) so there's room to position it.
           <em>✥ Position art</em> lets you drag (or arrow-key) the image inside the patch — cropped parts are kept,
           so you can drag them back in. The patch outline is drawn over the
           canvas; <em>Clear outside shape</em> makes pixels beyond a round/shield/hex outline transparent, and
@@ -932,6 +933,11 @@
                   <option value="cover">Fill patch (crop edges)</option>
                   <option value="stretch">Stretch</option>
                 </select>
+              </label>
+            </div>
+            <div class="row" id="marginRow">
+              <label class="f grow">Margin around image: <span id="marginVal">0 px</span>
+                <input type="range" id="patchMargin" min="0" max="32" step="1" value="0">
               </label>
             </div>
             <div class="row" id="ppiRow" hidden>
@@ -2706,6 +2712,7 @@
         hIn: Math.max(0.25, +$('patchH').value || 1),
         ppi: +$('ppi').value,
         res: $('patchRes').value,
+        margin: +$('patchMargin').value,
         fit: $('patchFit').value,
         outline: $('patchOutline').checked,
       };
@@ -2718,6 +2725,7 @@
       $('ppi').value = u.ppi;
       if (u.r !== undefined) $('patchR').value = u.r;
       $('patchRes').value = u.res || 'keep';
+      $('patchMargin').value = u.margin || 0;
       $('patchFit').value = u.fit === 'none' ? 'contain' : u.fit;
       $('patchOutline').checked = u.outline !== false;
       updatePatchInfo();
@@ -2741,8 +2749,12 @@
       return { w: Math.max(1, Math.min(MAX_CELLS, w)), h: Math.max(1, Math.min(MAX_CELLS, h)) };
     }
 
+    // Margin only applies to "Whole image": with "Fill" the art covers the patch by design.
+    const marginOf = u => (u.fit === 'cover' ? 0 : u.margin);
+
     function targetSize(u, aw, ah) {
-      return u.res === 'keep' && aw ? keepPixelsSize(aw, ah, u) : patchPixels(u);
+      const m = marginOf(u);
+      return u.res === 'keep' && aw ? keepPixelsSize(aw + 2 * m, ah + 2 * m, u) : patchPixels(u);
     }
 
     function updatePatchInfo() {
@@ -2764,7 +2776,16 @@
         $('patchInfo').textContent = `→ ${d.w} × ${d.h} px canvas · ${ppi.toFixed(1)} px/in, 1 px = ${(25.4 / ppi).toFixed(2)} mm` +
           (keep ? ' · no resampling' : '') + (px ? ` (now ${W} × ${H})` : '');
       }
-      $('moveArtBtn').disabled = !patchActive();
+      $('marginRow').hidden = u.fit === 'cover';
+      $('marginVal').textContent = `${u.margin} px`;
+      if (c && c.aw) $('patchMargin').max = Math.max(16, Math.ceil(Math.max(c.aw, c.ah) / 2));
+      // Positioning needs slack (or overflow) on at least one axis.
+      const room = patchActive() && layerValid() && (layer.aw !== W || layer.ah !== H);
+      $('moveArtBtn').disabled = !room;
+      $('moveArtBtn').title = room ? 'Drag the image to position it inside the patch'
+        : patchActive() ? 'The image fills the patch exactly — add a margin to make room to move it'
+        : 'Resize the canvas to a patch first';
+      if (patchActive() && layerValid() && !room) $('patchInfo').textContent += ' · fills the patch exactly — add a margin to move it';
       const square = Math.abs(u.wIn - u.hIn) < 1e-9;
       $('orLand').classList.toggle('on', !square && u.wIn > u.hIn);
       $('orPort').classList.toggle('on', !square && u.hIn > u.wIn);
@@ -2927,7 +2948,10 @@
       return Math.max(Math.min(a, b), Math.min(Math.max(a, b), d));
     }
 
-    $('patchApply').addEventListener('click', () => {
+    $('patchApply').addEventListener('click', () => applyPatch(false));
+
+    // live: part of a margin-slider drag that already pushed its undo step.
+    function applyPatch(live) {
       const u = patchSettings();
       setMoveMode(false);
       let L = px ? syncLayer() : null;
@@ -2937,13 +2961,14 @@
         if (u.res === 'ppi') {
           let dw = d.w, dh = d.h;
           if (u.fit !== 'stretch') {
-            const k = (u.fit === 'contain' ? Math.min : Math.max)(d.w / aw, d.h / ah);
+            const m = marginOf(u), bw = Math.max(1, d.w - 2 * m), bh = Math.max(1, d.h - 2 * m);
+            const k = (u.fit === 'contain' ? Math.min : Math.max)(bw / aw, bh / ah);
             dw = Math.max(1, Math.round(aw * k)); dh = Math.max(1, Math.round(ah * k));
           }
           art = scaleArt(art, aw, ah, dw, dh, 'stretch');
           aw = dw; ah = dh;
         }
-        beginEdit();
+        if (!live) beginEdit();
         layer = { art, aw, ah, dx: Math.floor((d.w - aw) / 2), dy: Math.floor((d.h - ah) / 2), W: d.w, H: d.h };
         W = d.w; H = d.h;
         px = compose(layer);
@@ -2958,8 +2983,18 @@
       activeColor = null;
       fitZoom();
       afterChange();
-      toast(`Canvas is now ${W} × ${H} px (${+u.wIn.toFixed(2)}″ × ${+u.hIn.toFixed(2)}″)`, 'ok');
+      if (!live) toast(`Canvas is now ${W} × ${H} px (${+u.wIn.toFixed(2)}″ × ${+u.hIn.toFixed(2)}″)`, 'ok');
+    }
+
+    // Dragging the margin re-fits an already-sized patch live (one undo step per drag).
+    let marginDrag = false;
+    $('patchMargin').addEventListener('input', () => {
+      updatePatchInfo();
+      if (!patchActive() || $('patchFit').value === 'cover') return;
+      applyPatch(marginDrag);
+      marginDrag = true;
     });
+    $('patchMargin').addEventListener('change', () => { marginDrag = false; });
 
     // ----- Position art mode
     function setMoveMode(on) {
