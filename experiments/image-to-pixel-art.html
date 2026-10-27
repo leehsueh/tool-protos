@@ -420,6 +420,7 @@
       color: #f0f6fc;
     }
     .move-bar[hidden] { display: none; }
+    .bg-chip { width: 1.4rem; height: 1.4rem; border-radius: 5px; border: 1px solid #8b949e; flex: none; }
     body.moving #editor { cursor: move; }
     .span2 { grid-column: 1 / -1; }
     .seg { display: inline-flex; }
@@ -719,9 +720,9 @@
           tapes…) or a custom size, choose Landscape/Portrait and set the corner radius, then <em>Resize canvas</em>.
           By default it keeps your pixels exactly as they are and only adds a transparent margin (or crops, with
           <em>Fill patch</em>) to reach the patch's proportions; <em>Set pixels per inch</em> rescales instead.
-          <em>Margin</em> adds space around the image (live) so there's room to position it.
-          <em>✥ Position art</em> lets you drag (or arrow-key) the image inside the patch — cropped parts are kept,
-          so you can drag them back in. The patch outline is drawn over the
+          <em>✥ Position art</em> lets you drag (or arrow-key) the image anywhere in the patch — cropped parts are
+          kept, so you can drag them back in, and any area the image no longer covers is filled with the brush
+          color (tap a color in the strip while positioning to change it, or the crossed swatch for transparent). The patch outline is drawn over the
           canvas; <em>Clear outside shape</em> makes pixels beyond a round/shield/hex outline transparent, and
           the SVG can be exported at the real size in inches.</li>
         <li><strong>Export</strong> — PNG at any integer scale, or SVG with one path per color.</li>
@@ -854,7 +855,8 @@
             </div>
           </div>
           <div class="move-bar" id="moveBar" hidden>
-            <span>✥ Drag to position the art</span>
+            <span>✥ Drag the art · fill</span>
+            <span class="bg-chip" id="moveBgChip"></span>
             <span class="grow"></span>
             <button id="moveCenter">Center</button>
             <button class="primary" id="moveDone">Done</button>
@@ -933,11 +935,6 @@
                   <option value="cover">Fill patch (crop edges)</option>
                   <option value="stretch">Stretch</option>
                 </select>
-              </label>
-            </div>
-            <div class="row" id="marginRow">
-              <label class="f grow">Margin around image: <span id="marginVal">0 px</span>
-                <input type="range" id="patchMargin" min="0" max="32" step="1" value="0">
               </label>
             </div>
             <div class="row" id="ppiRow" hidden>
@@ -1716,6 +1713,7 @@
       if (v) $('brushColor').value = hex(v);
       updateBrushChip();
       markPaletteSelection();
+      if (moveMode) moveBrushChanged();
     }
 
     // brush === 0 means "paint transparent" (picked from the quick palette).
@@ -2468,7 +2466,7 @@
         tol: +$('tol').value,
         detectedGrid,
         patch: patchActive() ? patch : null,
-        layer: layerValid() ? { art: layer.art.slice().buffer, aw: layer.aw, ah: layer.ah, dx: layer.dx, dy: layer.dy } : null,
+        layer: layerValid() ? { art: layer.art.slice().buffer, aw: layer.aw, ah: layer.ah, dx: layer.dx, dy: layer.dy, bg: layer.bg || 0 } : null,
         patchUI: patchSettings(),
       };
       if (!asNew && currentId !== null) rec.id = currentId;
@@ -2712,7 +2710,6 @@
         hIn: Math.max(0.25, +$('patchH').value || 1),
         ppi: +$('ppi').value,
         res: $('patchRes').value,
-        margin: +$('patchMargin').value,
         fit: $('patchFit').value,
         outline: $('patchOutline').checked,
       };
@@ -2725,7 +2722,6 @@
       $('ppi').value = u.ppi;
       if (u.r !== undefined) $('patchR').value = u.r;
       $('patchRes').value = u.res || 'keep';
-      $('patchMargin').value = u.margin || 0;
       $('patchFit').value = u.fit === 'none' ? 'contain' : u.fit;
       $('patchOutline').checked = u.outline !== false;
       updatePatchInfo();
@@ -2749,12 +2745,8 @@
       return { w: Math.max(1, Math.min(MAX_CELLS, w)), h: Math.max(1, Math.min(MAX_CELLS, h)) };
     }
 
-    // Margin only applies to "Whole image": with "Fill" the art covers the patch by design.
-    const marginOf = u => (u.fit === 'cover' ? 0 : u.margin);
-
     function targetSize(u, aw, ah) {
-      const m = marginOf(u);
-      return u.res === 'keep' && aw ? keepPixelsSize(aw + 2 * m, ah + 2 * m, u) : patchPixels(u);
+      return u.res === 'keep' && aw ? keepPixelsSize(aw, ah, u) : patchPixels(u);
     }
 
     function updatePatchInfo() {
@@ -2776,16 +2768,9 @@
         $('patchInfo').textContent = `→ ${d.w} × ${d.h} px canvas · ${ppi.toFixed(1)} px/in, 1 px = ${(25.4 / ppi).toFixed(2)} mm` +
           (keep ? ' · no resampling' : '') + (px ? ` (now ${W} × ${H})` : '');
       }
-      $('marginRow').hidden = u.fit === 'cover';
-      $('marginVal').textContent = `${u.margin} px`;
-      if (c && c.aw) $('patchMargin').max = Math.max(16, Math.ceil(Math.max(c.aw, c.ah) / 2));
-      // Positioning needs slack (or overflow) on at least one axis.
-      const room = patchActive() && layerValid() && (layer.aw !== W || layer.ah !== H);
-      $('moveArtBtn').disabled = !room;
-      $('moveArtBtn').title = room ? 'Drag the image to position it inside the patch'
-        : patchActive() ? 'The image fills the patch exactly — add a margin to make room to move it'
+      $('moveArtBtn').disabled = !patchActive();
+      $('moveArtBtn').title = patchActive() ? 'Drag the image inside the patch; uncovered area is filled with the brush color'
         : 'Resize the canvas to a patch first';
-      if (patchActive() && layerValid() && !room) $('patchInfo').textContent += ' · fills the patch exactly — add a margin to move it';
       const square = Math.abs(u.wIn - u.hIn) < 1e-9;
       $('orLand').classList.toggle('on', !square && u.wIn > u.hIn);
       $('orPort').classList.toggle('on', !square && u.hIn > u.wIn);
@@ -2918,10 +2903,19 @@
         bw = Math.max(W, L.dx + L.aw) - bx; bh = Math.max(H, L.dy + L.ah) - by;
         buf = new Uint32Array(bw * bh);
         for (let y = 0; y < L.ah; y++) buf.set(L.art.subarray(y * L.aw, (y + 1) * L.aw), (y + L.dy - by) * bw + (L.dx - bx));
-        for (let y = 0; y < H; y++) buf.set(px.subarray(y * W, (y + 1) * W), (y - by) * bw - bx);
+        // Canvas pixels win (they hold any edits), except background fill over empty art —
+        // that stays background so it doesn't travel with the image next time.
+        const bg = L.bg || 0;
+        for (let y = 0; y < H; y++) {
+          for (let x = 0; x < W; x++) {
+            const v = px[y * W + x], bi = (y - by) * bw + (x - bx);
+            if (v === bg && !buf[bi]) continue;
+            buf[bi] = v;
+          }
+        }
       }
       const t = trimmedCopy(buf, bw, bh);
-      return { art: t.art, aw: t.aw, ah: t.ah, dx: bx + t.ox, dy: by + t.oy, W, H };
+      return { art: t.art, aw: t.aw, ah: t.ah, dx: bx + t.ox, dy: by + t.oy, W, H, bg: layerValid() ? layer.bg || 0 : 0 };
     }
 
     // Size of the art's content (for the info line), without allocating a new layer when avoidable.
@@ -2931,21 +2925,19 @@
       return { aw: t.aw, ah: t.ah };
     }
 
+    // Canvas = background fill (L.bg, 0 = transparent) with the art on top; the fill also
+    // shows through the art's transparent pixels.
     function compose(L) {
-      const out = new Uint32Array(L.W * L.H);
+      const bg = L.bg || 0, out = new Uint32Array(L.W * L.H);
+      if (bg) out.fill(bg);
       const x0 = Math.max(0, L.dx), x1 = Math.min(L.W, L.dx + L.aw);
       if (x1 <= x0) return out;
       for (let y = Math.max(0, L.dy); y < Math.min(L.H, L.dy + L.ah); y++) {
         const ay = y - L.dy;
-        out.set(L.art.subarray(ay * L.aw + (x0 - L.dx), ay * L.aw + (x1 - L.dx)), y * L.W + x0);
+        if (!bg) { out.set(L.art.subarray(ay * L.aw + (x0 - L.dx), ay * L.aw + (x1 - L.dx)), y * L.W + x0); continue; }
+        for (let x = x0; x < x1; x++) { const v = L.art[ay * L.aw + x - L.dx]; if (v) out[y * L.W + x] = v; }
       }
       return out;
-    }
-
-    // Keep the art inside the patch when smaller, or covering it when larger.
-    function clampOffset(d, size, frame) {
-      const a = 0, b = frame - size;
-      return Math.max(Math.min(a, b), Math.min(Math.max(a, b), d));
     }
 
     $('patchApply').addEventListener('click', () => applyPatch(false));
@@ -2961,8 +2953,7 @@
         if (u.res === 'ppi') {
           let dw = d.w, dh = d.h;
           if (u.fit !== 'stretch') {
-            const m = marginOf(u), bw = Math.max(1, d.w - 2 * m), bh = Math.max(1, d.h - 2 * m);
-            const k = (u.fit === 'contain' ? Math.min : Math.max)(bw / aw, bh / ah);
+            const k = (u.fit === 'contain' ? Math.min : Math.max)(d.w / aw, d.h / ah);
             dw = Math.max(1, Math.round(aw * k)); dh = Math.max(1, Math.round(ah * k));
           }
           art = scaleArt(art, aw, ah, dw, dh, 'stretch');
@@ -2986,15 +2977,6 @@
       if (!live) toast(`Canvas is now ${W} × ${H} px (${+u.wIn.toFixed(2)}″ × ${+u.hIn.toFixed(2)}″)`, 'ok');
     }
 
-    // Dragging the margin re-fits an already-sized patch live (one undo step per drag).
-    let marginDrag = false;
-    $('patchMargin').addEventListener('input', () => {
-      updatePatchInfo();
-      if (!patchActive() || $('patchFit').value === 'cover') return;
-      applyPatch(marginDrag);
-      marginDrag = true;
-    });
-    $('patchMargin').addEventListener('change', () => { marginDrag = false; });
 
     // ----- Position art mode
     function setMoveMode(on) {
@@ -3006,6 +2988,7 @@
       $('moveBar').hidden = !on;
       if (on) {
         layer = syncLayer(); // pick up any edits; does not change the canvas
+        updateMoveBg();
         closeSheet();
       }
     }
@@ -3021,10 +3004,13 @@
 
     function setArtOffset(dx, dy) {
       if (!layer) return;
-      dx = clampOffset(dx, layer.aw, W); dy = clampOffset(dy, layer.ah, H);
+      // Free movement; keep at least one pixel of the art on the canvas so it can't get lost.
+      dx = Math.max(1 - layer.aw, Math.min(W - 1, dx));
+      dy = Math.max(1 - layer.ah, Math.min(H - 1, dy));
       if (dx === layer.dx && dy === layer.dy) return;
       moveUndo();
-      layer = { ...layer, dx, dy };
+      layer = { ...layer, dx, dy, bg: brush };
+      updateMoveBg();
       px = compose(layer);
       render();
     }
@@ -3047,6 +3033,23 @@
 
     $('moveArtBtn').addEventListener('click', () => setMoveMode(true));
     $('moveDone').addEventListener('click', () => setMoveMode(false));
+
+    function updateMoveBg() {
+      const chip = $('moveBgChip');
+      chip.classList.toggle('checker', !brush);
+      chip.style.backgroundColor = brush ? hex(brush) : '';
+      chip.title = brush ? `Uncovered area: ${hex(brush)}` : 'Uncovered area: transparent';
+    }
+
+    // Picking a brush color while positioning refills the uncovered area.
+    function moveBrushChanged() {
+      updateMoveBg();
+      if (!layer || (layer.bg || 0) === brush) return;
+      moveUndo();
+      layer = { ...layer, bg: brush };
+      px = compose(layer);
+      afterChange();
+    }
     $('moveCenter').addEventListener('click', () => {
       if (!layer) return;
       setArtOffset(Math.floor((W - layer.aw) / 2), Math.floor((H - layer.ah) / 2));
