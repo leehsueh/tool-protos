@@ -407,6 +407,20 @@
     .toolbar .tools-main, .toolbar .tools-sub { display: contents; }
     .empty p { margin-bottom: 0.75rem; }
     .push { margin-left: auto; }
+    .move-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+      padding: 0.45rem 0.6rem;
+      border: 1px solid #ff2bd6;
+      border-radius: 8px;
+      background: #ff2bd61a;
+      font-size: 0.85rem;
+      color: #f0f6fc;
+    }
+    .move-bar[hidden] { display: none; }
+    body.moving #editor { cursor: move; }
     .span2 { grid-column: 1 / -1; }
     .seg { display: inline-flex; }
     .seg button { border-radius: 0; }
@@ -500,6 +514,7 @@
         border-radius: 0;
         touch-action: none;
       }
+      .move-bar { order: 0; margin: 0; border-radius: 0; border-width: 0 0 1px; }
       .statusbar { order: 2; margin: 0; padding: 0.3rem 0.75rem; background: #0d1117; border-top: 1px solid #21262d; }
       .sheet-spacer { display: block; order: 3; flex: none; height: var(--sheet-h, 0px); }
 
@@ -701,8 +716,11 @@
         <li><strong>Reduce colors</strong> — drag the slider to merge the palette down to N colors (live preview,
           one undo step).</li>
         <li><strong>Patch size</strong> — pick a hook &amp; loop patch (morale 3″×2″, flag, rounds, shield, name
-          tapes…) or a custom size, choose Landscape/Portrait and a pixel density, then <em>Resize canvas</em>.
-          The art is fitted, cropped, stretched or centered (undoable). The patch outline is drawn over the
+          tapes…) or a custom size, choose Landscape/Portrait and set the corner radius, then <em>Resize canvas</em>.
+          By default it keeps your pixels exactly as they are and only adds a transparent margin (or crops, with
+          <em>Fill patch</em>) to reach the patch's proportions; <em>Set pixels per inch</em> rescales instead.
+          <em>✥ Position art</em> lets you drag (or arrow-key) the image inside the patch — cropped parts are kept,
+          so you can drag them back in. The patch outline is drawn over the
           canvas; <em>Clear outside shape</em> makes pixels beyond a round/shield/hex outline transparent, and
           the SVG can be exported at the real size in inches.</li>
         <li><strong>Export</strong> — PNG at any integer scale, or SVG with one path per color.</li>
@@ -834,6 +852,12 @@
               <label class="chk gridchk"><input type="checkbox" id="showGrid" checked> Grid</label>
             </div>
           </div>
+          <div class="move-bar" id="moveBar" hidden>
+            <span>✥ Drag to position the art</span>
+            <span class="grow"></span>
+            <button id="moveCenter">Center</button>
+            <button class="primary" id="moveDone">Done</button>
+          </div>
           <div class="editor-wrap checker" id="editorWrap">
             <div class="empty" id="emptyMsg">
               <p>Your pixel art will appear here.</p>
@@ -887,6 +911,7 @@
               <label class="f span2">Size<select id="patchPreset"></select></label>
               <label class="f">Width (in)<input type="number" id="patchW" min="0.25" max="24" step="0.25" value="3"></label>
               <label class="f">Height (in)<input type="number" id="patchH" min="0.25" max="24" step="0.25" value="2"></label>
+              <label class="f" id="patchRRow">Corner radius (mm)<input type="number" id="patchR" min="0" max="60" step="0.5" value="5"></label>
             </div>
             <div class="row">
               <div class="seg" role="group" aria-label="Orientation">
@@ -894,24 +919,32 @@
                 <button type="button" id="orPort" title="Taller than wide">▯ Portrait</button>
               </div>
             </div>
-            <div class="row">
-              <label class="f grow">Pixels per inch: <span id="ppiVal"></span>
-                <input type="range" id="ppi" min="4" max="64" step="1" value="16">
+            <div class="fields" style="margin-top:0.55rem">
+              <label class="f">Resolution
+                <select id="patchRes">
+                  <option value="keep">Keep current pixels</option>
+                  <option value="ppi">Set pixels per inch</option>
+                </select>
+              </label>
+              <label class="f">Fit
+                <select id="patchFit">
+                  <option value="contain">Whole image (add margin)</option>
+                  <option value="cover">Fill patch (crop edges)</option>
+                  <option value="stretch">Stretch</option>
+                </select>
               </label>
             </div>
-            <div class="row">
-              <label class="f grow">Fit artwork
-                <select id="patchFit">
-                  <option value="contain">Fit inside (pad with transparent)</option>
-                  <option value="cover">Fill (crop the edges)</option>
-                  <option value="stretch">Stretch</option>
-                  <option value="none">Don't scale (center)</option>
-                </select>
+            <div class="row" id="ppiRow" hidden>
+              <label class="f grow">Pixels per inch: <span id="ppiVal"></span>
+                <input type="range" id="ppi" min="4" max="64" step="1" value="16">
               </label>
             </div>
             <div class="status" id="patchInfo"></div>
             <div class="row">
               <button class="primary" id="patchApply">Resize canvas</button>
+              <button id="moveArtBtn" title="Drag the image to position it inside the patch" disabled>✥ Position art</button>
+            </div>
+            <div class="row">
               <button id="patchClear" title="Make pixels outside the patch shape transparent" disabled>Clear outside shape</button>
             </div>
             <div class="row">
@@ -1040,6 +1073,8 @@
     let detectedGrid = null;                  // grid from the last auto-detect (or its fallback)
     let srcBlob = null;                       // original image file, kept so projects can save it
     let patch = null;                         // physical patch the canvas was last sized to (see patchActive)
+    let layer = null;                         // art placed in the patch: { art, aw, ah, dx, dy, W, H } (never mutated)
+    let moveMode = false, moving = null, moveUndone = false;
     let currentId = null, dirty = false;      // open saved project, unsaved-changes flag
     let tool = 'pencil', brush = pack(0, 0, 0);
     let activeColor = null, merging = false;
@@ -1346,7 +1381,7 @@
     // ---------------------------------------------------------------
     function pushUndo() {
       if (!px) return;
-      undoStack.push({ W, H, px: px.slice(), patch });
+      undoStack.push({ W, H, px: px.slice(), patch, layer });
       if (undoStack.length > 100) undoStack.shift();
       dirty = true;
       redoStack = [];
@@ -1361,10 +1396,10 @@
 
     function restore(from, to) {
       if (!from.length) return;
-      to.push({ W, H, px: px.slice(), patch });
+      to.push({ W, H, px: px.slice(), patch, layer });
       const s = from.pop();
       const resized = s.W !== W || s.H !== H;
-      W = s.W; H = s.H; px = s.px; patch = s.patch;
+      W = s.W; H = s.H; px = s.px; patch = s.patch; layer = s.layer;
       reduceBase = null;
       if (resized) fitZoom();
       afterChange();
@@ -1462,6 +1497,7 @@
       mergeSimilar(out, +$('tol').value);
       const resized = w !== W || h !== H;
       W = w; H = h; px = out;
+      layer = null;
       activeColor = null;
       if (resized || fresh) fitZoom();
       afterChange();
@@ -1483,6 +1519,7 @@
       $('projName').value = 'untitled';
       renderProjects();
       W = w; H = h; px = new Uint32Array(w * h);
+      layer = null;
       activeColor = null;
       fitZoom();
       afterChange();
@@ -1946,6 +1983,7 @@
 
     editor.addEventListener('pointerdown', e => {
       if (!px || pan) return;
+      if (moveMode) { e.preventDefault(); editor.setPointerCapture(e.pointerId); startMove(e); return; }
       const c = cellAt(e);
       if (!c) return;
       e.preventDefault();
@@ -1965,6 +2003,7 @@
 
     editor.addEventListener('pointermove', e => {
       if (!px || pan) return;
+      if (moving) { if (e.pointerId === moving.id) dragMove(e); return; }
       if (drawing && e.pointerId === drawing.id) {
         const c = cellAt(e, true);
         plotLine(drawing.last, c, drawing.color);
@@ -1979,6 +2018,7 @@
     });
 
     const endStroke = e => {
+      if (moving && e.pointerId === moving.id) { moving = null; afterChange(); return; }
       if (pendingTap && e.type === 'pointerup' && e.pointerId === pendingTap.id) {
         const tap = pendingTap;
         pendingTap = null;
@@ -1999,7 +2039,7 @@
       if (!drawing) return;
       drawing = null;
       const s = undoStack.pop();
-      if (s) { px = s.px; W = s.W; H = s.H; patch = s.patch; }
+      if (s) { px = s.px; W = s.W; H = s.H; patch = s.patch; layer = s.layer; }
       afterChange();
     }
 
@@ -2032,7 +2072,7 @@
 
     let pan = null, spaceDown = false;
     const touches = new Map();
-    const canPan = () => tool === 'hand' || spaceDown;
+    const canPan = () => (tool === 'hand' && !moveMode) || spaceDown;
     const updatePanCursor = () => wrap.classList.toggle('can-pan', canPan());
 
     // Capture phase so a pan gesture never reaches the drawing handlers.
@@ -2106,6 +2146,7 @@
     window.addEventListener('blur', () => { spaceDown = false; updatePanCursor(); });
 
     function setTool(t) {
+      setMoveMode(false);
       tool = t;
       document.querySelectorAll('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
       updatePanCursor();
@@ -2127,6 +2168,13 @@
       if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? restore(redoStack, undoStack) : restore(undoStack, redoStack); return; }
       if (mod && k === 'y') { e.preventDefault(); restore(redoStack, undoStack); return; }
       if (mod || e.altKey) return;
+      if (moveMode && e.key.startsWith('Arrow')) {
+        e.preventDefault();
+        const st = e.shiftKey ? 5 : 1;
+        nudgeArt(e.key === 'ArrowLeft' ? -st : e.key === 'ArrowRight' ? st : 0, e.key === 'ArrowUp' ? -st : e.key === 'ArrowDown' ? st : 0);
+        return;
+      }
+      if (moveMode && (k === 'enter' || k === 'escape')) { setMoveMode(false); return; }
       const tools = { b: 'pencil', e: 'eraser', g: 'fill', r: 'replace', i: 'picker', h: 'hand' };
       if (tools[k]) setTool(tools[k]);
       else if (k === 'escape') { if (merging) setMerging(false); else closeSheet(); }
@@ -2414,6 +2462,7 @@
         tol: +$('tol').value,
         detectedGrid,
         patch: patchActive() ? patch : null,
+        layer: layerValid() ? { art: layer.art.slice().buffer, aw: layer.aw, ah: layer.ah, dx: layer.dx, dy: layer.dy } : null,
         patchUI: patchSettings(),
       };
       if (!asNew && currentId !== null) rec.id = currentId;
@@ -2445,6 +2494,8 @@
       W = p.W; H = p.H;
       px = new Uint32Array(p.pixels.slice(0));
       patch = p.patch || null;
+      layer = p.layer ? { ...p.layer, art: new Uint32Array(p.layer.art.slice(0)), W: p.W, H: p.H } : null;
+      setMoveMode(false);
       if (p.patchUI) restorePatchSettings(p.patchUI);
       undoStack = []; redoStack = [];
       activeColor = null; reduceBase = null; recolorIdx = null;
@@ -2648,12 +2699,13 @@
         preset: sel,
         label: base ? base.label : 'Custom',
         shape: base ? base.shape : 'rect',
-        r: base ? base.r : 0,
+        r: Math.max(0, +$('patchR').value || 0),
         // shield and hex have a natural orientation; when swapped the outline turns 90°
         natural: base ? (base.w >= base.h ? 'landscape' : 'portrait') : 'landscape',
         wIn: Math.max(0.25, +$('patchW').value || 1),
         hIn: Math.max(0.25, +$('patchH').value || 1),
         ppi: +$('ppi').value,
+        res: $('patchRes').value,
         fit: $('patchFit').value,
         outline: $('patchOutline').checked,
       };
@@ -2664,7 +2716,9 @@
       $('patchW').value = u.wIn;
       $('patchH').value = u.hIn;
       $('ppi').value = u.ppi;
-      $('patchFit').value = u.fit;
+      if (u.r !== undefined) $('patchR').value = u.r;
+      $('patchRes').value = u.res || 'keep';
+      $('patchFit').value = u.fit === 'none' ? 'contain' : u.fit;
       $('patchOutline').checked = u.outline !== false;
       updatePatchInfo();
     }
@@ -2674,10 +2728,43 @@
                h: Math.max(1, Math.min(MAX_CELLS, Math.round(u.hIn * u.ppi))) };
     }
 
+    // Canvas size for "keep current pixels": the smallest (contain) or largest (cover) frame with the
+    // patch's aspect ratio around the art's content, so no pixel is resampled.
+    function keepPixelsSize(aw, ah, u) {
+      const ar = u.wIn / u.hIn;
+      let w, h;
+      if (u.fit === 'cover') {
+        w = Math.min(aw, Math.round(ah * ar)); h = Math.min(ah, Math.round(w / ar));
+      } else {
+        w = Math.max(aw, Math.round(ah * ar)); h = Math.max(ah, Math.round(w / ar));
+      }
+      return { w: Math.max(1, Math.min(MAX_CELLS, w)), h: Math.max(1, Math.min(MAX_CELLS, h)) };
+    }
+
+    function targetSize(u, aw, ah) {
+      return u.res === 'keep' && aw ? keepPixelsSize(aw, ah, u) : patchPixels(u);
+    }
+
     function updatePatchInfo() {
-      const u = patchSettings(), d = patchPixels(u);
+      const u = patchSettings();
+      const keep = u.res === 'keep';
+      $('ppiRow').hidden = keep;
+      $('patchFit').querySelector('[value=stretch]').disabled = keep;
+      if (keep && u.fit === 'stretch') $('patchFit').value = 'contain';
+      $('patchRRow').style.visibility = u.shape === 'rect' ? '' : 'hidden';
       $('ppiVal').textContent = `${u.ppi} (1 px = ${(25.4 / u.ppi).toFixed(2)} mm)`;
-      $('patchInfo').textContent = `→ ${d.w} × ${d.h} px canvas` + (px ? ` (now ${W} × ${H})` : '');
+      const c = px ? contentSize() : null;
+      if (keep && !(c && c.aw)) {
+        $('patchInfo').textContent = px ? 'The canvas is empty — switch Resolution to "Set pixels per inch".'
+          : 'No art yet — a blank canvas will use pixels per inch.';
+        if (!px) $('ppiRow').hidden = false;
+      } else {
+        const d = targetSize(patchSettings(), c && c.aw, c && c.ah);
+        const ppi = d.w / u.wIn;
+        $('patchInfo').textContent = `→ ${d.w} × ${d.h} px canvas · ${ppi.toFixed(1)} px/in, 1 px = ${(25.4 / ppi).toFixed(2)} mm` +
+          (keep ? ' · no resampling' : '') + (px ? ` (now ${W} × ${H})` : '');
+      }
+      $('moveArtBtn').disabled = !patchActive();
       const square = Math.abs(u.wIn - u.hIn) < 1e-9;
       $('orLand').classList.toggle('on', !square && u.wIn > u.hIn);
       $('orPort').classList.toggle('on', !square && u.hIn > u.wIn);
@@ -2692,7 +2779,8 @@
     function applyPreset() {
       const sel = $('patchPreset').value;
       if (sel === 'custom') { updatePatchInfo(); return; }
-      let { w, h } = PATCH_PRESETS[+sel];
+      let { w, h, r } = PATCH_PRESETS[+sel];
+      $('patchR').value = r;
       if (orientPref && w !== h && (orientPref === 'portrait') !== (h > w)) [w, h] = [h, w];
       $('patchW').value = w;
       $('patchH').value = h;
@@ -2775,26 +2863,159 @@
     for (const id of ['patchW', 'patchH']) $(id).addEventListener('input', () => { $('patchPreset').value = 'custom'; updatePatchInfo(); });
     $('ppi').addEventListener('input', updatePatchInfo);
     $('patchFit').addEventListener('change', updatePatchInfo);
+    $('patchRes').addEventListener('change', updatePatchInfo);
+    // The corner radius is live: it reshapes the outline of an already-sized patch.
+    $('patchR').addEventListener('input', () => {
+      if (patchActive() && patch.shape === 'rect') { patch = { ...patch, r: Math.max(0, +$('patchR').value || 0) }; render(); }
+    });
     $('orLand').addEventListener('click', () => setOrientation('landscape'));
     $('orPort').addEventListener('click', () => setOrientation('portrait'));
     $('patchOutline').addEventListener('change', render);
     $('svgPhys').addEventListener('change', updatePatchInfo);
 
-    $('patchApply').addEventListener('click', () => {
-      const u = patchSettings(), d = patchPixels(u);
-      if (px) {
-        beginEdit();
-        px = scaleArt(px, W, H, d.w, d.h, u.fit);
-      } else {
-        dirty = true;
-        px = new Uint32Array(d.w * d.h);
+    // ----- Art layer: the image placed in the patch, kept whole so cropping/moving never loses pixels.
+    const layerValid = () => !!(layer && px && layer.W === W && layer.H === H);
+
+    function trimmedCopy(src, sw, sh) {
+      let x0 = sw, y0 = sh, x1 = -1, y1 = -1;
+      for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
+        if (src[y * sw + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
       }
-      W = d.w; H = d.h;
+      if (x1 < 0) return { art: new Uint32Array(0), aw: 0, ah: 0, ox: 0, oy: 0 };
+      const aw = x1 - x0 + 1, ah = y1 - y0 + 1, art = new Uint32Array(aw * ah);
+      for (let y = 0; y < ah; y++) art.set(src.subarray((y + y0) * sw + x0, (y + y0) * sw + x0 + aw), y * aw);
+      return { art, aw, ah, ox: x0, oy: y0 };
+    }
+
+    // A fresh layer that matches the canvas: the old layer (if still valid) with the canvas
+    // pixels — including any edits — written over it, trimmed to its non-transparent content.
+    function syncLayer() {
+      let buf = px, bw = W, bh = H, bx = 0, by = 0; // buffer and its position in canvas coords
+      if (layerValid()) {
+        const L = layer;
+        bx = Math.min(0, L.dx); by = Math.min(0, L.dy);
+        bw = Math.max(W, L.dx + L.aw) - bx; bh = Math.max(H, L.dy + L.ah) - by;
+        buf = new Uint32Array(bw * bh);
+        for (let y = 0; y < L.ah; y++) buf.set(L.art.subarray(y * L.aw, (y + 1) * L.aw), (y + L.dy - by) * bw + (L.dx - bx));
+        for (let y = 0; y < H; y++) buf.set(px.subarray(y * W, (y + 1) * W), (y - by) * bw - bx);
+      }
+      const t = trimmedCopy(buf, bw, bh);
+      return { art: t.art, aw: t.aw, ah: t.ah, dx: bx + t.ox, dy: by + t.oy, W, H };
+    }
+
+    // Size of the art's content (for the info line), without allocating a new layer when avoidable.
+    function contentSize() {
+      if (layerValid()) return { aw: layer.aw, ah: layer.ah };
+      const t = trimmedCopy(px, W, H);
+      return { aw: t.aw, ah: t.ah };
+    }
+
+    function compose(L) {
+      const out = new Uint32Array(L.W * L.H);
+      const x0 = Math.max(0, L.dx), x1 = Math.min(L.W, L.dx + L.aw);
+      if (x1 <= x0) return out;
+      for (let y = Math.max(0, L.dy); y < Math.min(L.H, L.dy + L.ah); y++) {
+        const ay = y - L.dy;
+        out.set(L.art.subarray(ay * L.aw + (x0 - L.dx), ay * L.aw + (x1 - L.dx)), y * L.W + x0);
+      }
+      return out;
+    }
+
+    // Keep the art inside the patch when smaller, or covering it when larger.
+    function clampOffset(d, size, frame) {
+      const a = 0, b = frame - size;
+      return Math.max(Math.min(a, b), Math.min(Math.max(a, b), d));
+    }
+
+    $('patchApply').addEventListener('click', () => {
+      const u = patchSettings();
+      setMoveMode(false);
+      let L = px ? syncLayer() : null;
+      if (L && L.aw) {
+        const d = targetSize(u, L.aw, L.ah);
+        let { art, aw, ah } = L;
+        if (u.res === 'ppi') {
+          let dw = d.w, dh = d.h;
+          if (u.fit !== 'stretch') {
+            const k = (u.fit === 'contain' ? Math.min : Math.max)(d.w / aw, d.h / ah);
+            dw = Math.max(1, Math.round(aw * k)); dh = Math.max(1, Math.round(ah * k));
+          }
+          art = scaleArt(art, aw, ah, dw, dh, 'stretch');
+          aw = dw; ah = dh;
+        }
+        beginEdit();
+        layer = { art, aw, ah, dx: Math.floor((d.w - aw) / 2), dy: Math.floor((d.h - ah) / 2), W: d.w, H: d.h };
+        W = d.w; H = d.h;
+        px = compose(layer);
+      } else {
+        const d = patchPixels(u);
+        if (px) beginEdit(); else dirty = true;
+        W = d.w; H = d.h;
+        px = new Uint32Array(W * H);
+        layer = null;
+      }
       patch = { ...u, W, H };
       activeColor = null;
       fitZoom();
       afterChange();
       toast(`Canvas is now ${W} × ${H} px (${+u.wIn.toFixed(2)}″ × ${+u.hIn.toFixed(2)}″)`, 'ok');
+    });
+
+    // ----- Position art mode
+    function setMoveMode(on) {
+      if (on && !patchActive()) return;
+      moveMode = on;
+      moving = null;
+      moveUndone = false;
+      document.body.classList.toggle('moving', on);
+      $('moveBar').hidden = !on;
+      if (on) {
+        layer = syncLayer(); // pick up any edits; does not change the canvas
+        closeSheet();
+      }
+    }
+
+    // One undo step per positioning session.
+    function moveUndo() {
+      if (moveUndone) return;
+      const keep = layer;
+      beginEdit();
+      layer = keep;
+      moveUndone = true;
+    }
+
+    function setArtOffset(dx, dy) {
+      if (!layer) return;
+      dx = clampOffset(dx, layer.aw, W); dy = clampOffset(dy, layer.ah, H);
+      if (dx === layer.dx && dy === layer.dy) return;
+      moveUndo();
+      layer = { ...layer, dx, dy };
+      px = compose(layer);
+      render();
+    }
+
+    function startMove(e) {
+      if (!layer || !layer.aw) return;
+      moving = { id: e.pointerId, x: e.clientX, y: e.clientY, dx: layer.dx, dy: layer.dy };
+    }
+
+    function dragMove(e) {
+      const r = editor.getBoundingClientRect();
+      const mx = Math.round((e.clientX - moving.x) / (r.width / W));
+      const my = Math.round((e.clientY - moving.y) / (r.height / H));
+      setArtOffset(moving.dx + mx, moving.dy + my);
+    }
+
+    function nudgeArt(x, y) {
+      if (layer) { setArtOffset(layer.dx + x, layer.dy + y); afterChange(); }
+    }
+
+    $('moveArtBtn').addEventListener('click', () => setMoveMode(true));
+    $('moveDone').addEventListener('click', () => setMoveMode(false));
+    $('moveCenter').addEventListener('click', () => {
+      if (!layer) return;
+      setArtOffset(Math.floor((W - layer.aw) / 2), Math.floor((H - layer.ah) / 2));
+      afterChange();
     });
 
     $('patchClear').addEventListener('click', () => {
