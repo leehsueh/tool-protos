@@ -725,7 +725,9 @@
           color (tap a color in the strip while positioning to change it, or the crossed swatch for transparent). The patch outline is drawn over the
           canvas; <em>Clear outside shape</em> makes pixels beyond a round/shield/hex outline transparent, and
           the SVG can be exported at the real size in inches.</li>
-        <li><strong>Export</strong> — PNG at any integer scale, or SVG with one path per color.</li>
+        <li><strong>Export</strong> — PNG at any integer scale, SVG with one path per color, or a vector PDF.
+          With a patch size set the PDF is at the real patch size, on its own page or centered on Letter/A4
+          with an optional cut line around the patch shape.</li>
         <li><strong>On a phone</strong> — the canvas fills the screen and everything sits in the thumb zone:
           tools along the bottom, a scrollable strip of the image's colors above them (tap = brush color,
           long-press = open it in the palette, the crossed swatch paints transparent), and a tab bar that
@@ -753,6 +755,10 @@
       <p><strong>SVG export</strong> merges horizontal runs of equal color, extends them downward while the
         run below matches, and writes one <code>&lt;path&gt;</code> per color with
         <code>shape-rendering="crispEdges"</code>, so it stays small and each color is easy to edit.</p>
+      <p><strong>PDF export</strong> is written by hand (no library): a single page whose content stream
+        fills one path of rectangles per color, transformed so pixels map to points at the patch's physical
+        size, plus an optional stroked outline built from the same Bézier commands that draw the on-canvas
+        patch outline.</p>
       <p><strong>Saving</strong> uses the IndexedDB database <code>tool-protos/image-to-pixel-art</code> (prefixed because every repo on the account shares one GitHub Pages origin): each project stores its pixels as a raw
         <code>ArrayBuffer</code>, a thumbnail, the grid/sampling settings and (optionally) the original image
         file as a <code>Blob</code>. The page asks the browser for persistent storage so saved work isn't
@@ -963,13 +969,25 @@
             <div class="row">
               <button class="primary" id="pngBtn" disabled>Download PNG</button>
               <button class="primary" id="svgBtn" disabled>Download SVG</button>
+              <button class="primary" id="pdfBtn" disabled>Download PDF</button>
               <button id="copySvgBtn" disabled>Copy SVG</button>
+            </div>
+            <div class="row">
+              <label class="f">PDF page
+                <select id="pdfPage">
+                  <option value="art">Same size as the art</option>
+                  <option value="letter">US Letter, centered</option>
+                  <option value="a4">A4, centered</option>
+                </select>
+              </label>
+              <label class="chk" id="pdfOutlineRow" hidden><input type="checkbox" id="pdfOutline" checked> Patch cut line</label>
             </div>
             <div class="row" id="svgPhysRow" hidden>
               <label class="chk"><input type="checkbox" id="svgPhys" checked> SVG at real patch size (<span id="svgPhysSize"></span>)</label>
             </div>
-            <p class="hint" style="margin-top:0.5rem">SVG uses a viewBox in pixel units, so it scales cleanly;
-              the scale only sets its default width/height.</p>
+            <p class="hint" style="margin-top:0.5rem">SVG and PDF are vector, so they stay sharp at any size.
+              With a patch size set, the PDF prints at the real patch size (choose "actual size" when printing);
+              otherwise it uses the scale above at 96 px per inch.</p>
           </section>
 
           <section class="card sheet projects-card" data-sheet="saved">
@@ -1687,7 +1705,7 @@
       renderPalette();
       updateUndoButtons();
       const has = !!px;
-      for (const id of ['pngBtn', 'svgBtn', 'copySvgBtn', 'saveBtn', 'saveAsBtn']) $(id).disabled = !has;
+      for (const id of ['pngBtn', 'svgBtn', 'pdfBtn', 'copySvgBtn', 'saveBtn', 'saveAsBtn']) $(id).disabled = !has;
       $('kSlider').disabled = !has;
       $('gridDims').textContent = srcData ? `source ${srcData.width}×${srcData.height}` : '';
       updatePatchInfo();
@@ -2283,7 +2301,8 @@
     // ---------------------------------------------------------------
     function exportScale() { return Math.max(1, Math.min(128, Math.round(+$('scale').value || 1))); }
 
-    function buildSVG(scale) {
+    // Pixels as rectangles, grouped by color: horizontal runs, extended down while the run below matches.
+    function mergedRects() {
       const byColor = new Map();
       let active = new Map();
       for (let y = 0; y < H; y++) {
@@ -2307,12 +2326,74 @@
         }
         active = next;
       }
+      return byColor;
+    }
+
+    function buildSVG(scale) {
+      const byColor = mergedRects();
       const paths = [...byColor].map(([v, rects]) =>
         `  <path fill="${hex(v)}" d="${rects.map(r => `M${r.x} ${r.y}h${r.w}v${r.h}h-${r.w}z`).join('')}"/>`);
       const phys = patchActive() && $('svgPhys').checked;
       const sw = phys ? +patch.wIn.toFixed(3) + 'in' : W * scale, sh = phys ? +patch.hIn.toFixed(3) + 'in' : H * scale;
       return `<svg xmlns="http://www.w3.org/2000/svg" width="${sw}" height="${sh}" ` +
         `viewBox="0 0 ${W} ${H}" shape-rendering="crispEdges">\n${paths.join('\n')}\n</svg>\n`;
+    }
+
+    // Minimal single-page vector PDF: one filled path per color, optional patch cut line and caption.
+    function buildPDF() {
+      const num = v => +v.toFixed(4);
+      const phys = patchActive();
+      const artW = phys ? patch.wIn * 72 : W * exportScale() * 0.75; // 0.75 pt per CSS px (96 dpi)
+      const artH = phys ? patch.hIn * 72 : H * exportScale() * 0.75;
+      const paper = $('pdfPage').value, M = 36;
+      let pw = artW, ph = artH, s = 1;
+      if (paper !== 'art') {
+        [pw, ph] = paper === 'letter' ? [612, 792] : [595.28, 841.89];
+        if (artW > artH) [pw, ph] = [ph, pw];
+        s = Math.min(1, (pw - 2 * M) / artW, (ph - 2 * M - 30) / artH);
+      }
+      const dw = artW * s, dh = artH * s, ox = (pw - dw) / 2, oy = paper === 'art' ? 0 : (ph - dh) / 2 + 12;
+      const k = dw / W; // points per pixel
+      const ops = [`q ${num(k)} 0 0 ${num(-k)} ${num(ox)} ${num(oy + dh)} cm`];
+      const e = 0.02; // tiny overlap hides hairline seams between neighbouring rectangles in viewers
+      for (const [v, rects] of mergedRects()) {
+        ops.push(`${num(R(v) / 255)} ${num(G(v) / 255)} ${num(B(v) / 255)} rg`);
+        for (const r of rects) ops.push(`${r.x} ${r.y} ${num(Math.min(r.w + e, W - r.x))} ${num(Math.min(r.h + e, H - r.y))} re`);
+        ops.push('f');
+      }
+      if (phys && $('pdfOutline').checked) {
+        ops.push(`0 0 0 RG ${num(0.5 / k)} w`);
+        for (const [c, ...a] of patchOutline(patch, W, H)) {
+          ops.push(c === 'M' ? `${num(a[0])} ${num(a[1])} m` : c === 'L' ? `${num(a[0])} ${num(a[1])} l`
+            : c === 'C' ? `${a.map(num).join(' ')} c` : 'h');
+        }
+        ops.push('S');
+      }
+      ops.push('Q');
+      const ascii = t => t.replace(/[^\x20-\x7e]/g, '').replace(/[\\()]/g, '\\$&');
+      const name = ascii(srcName);
+      if (paper !== 'art') {
+        const size = phys ? `${num(patch.wIn)} x ${num(patch.hIn)} in` : `${W} x ${H} px`;
+        const note = s < 1 ? `scaled to ${Math.round(s * 100)}% to fit the page` : 'print at 100% / actual size';
+        ops.push(`BT /F1 9 Tf 0.4 0.4 0.4 rg ${num(M)} ${num(M - 12)} Td (${ascii(`${name} - ${size} - ${note}`)}) Tj ET`);
+      }
+      const content = ops.join('\n');
+      const objs = [
+        '<< /Type /Catalog /Pages 2 0 R >>',
+        '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+        `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${num(pw)} ${num(ph)}] /Contents 4 0 R ` +
+          '/Resources << /Font << /F1 5 0 R >> >> >>',
+        `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+        '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+        `<< /Title (${name}) /Producer (tool-protos Image to Pixel Art) >>`,
+      ];
+      let pdf = '%PDF-1.4\n';
+      const offsets = objs.map((o, i) => { const at = pdf.length; pdf += `${i + 1} 0 obj\n${o}\nendobj\n`; return at; });
+      const xref = pdf.length;
+      pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` +
+        offsets.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('') +
+        `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R /Info 6 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+      return pdf; // pure ASCII, so string length = byte length
     }
 
     function download(blob, name) {
@@ -2346,6 +2427,11 @@
     $('svgBtn').addEventListener('click', () => {
       if (!px) return;
       download(new Blob([buildSVG(exportScale())], { type: 'image/svg+xml' }), `${srcName}-${W}x${H}.svg`);
+    });
+
+    $('pdfBtn').addEventListener('click', () => {
+      if (!px) return;
+      download(new Blob([buildPDF()], { type: 'application/pdf' }), `${srcName}-${W}x${H}.pdf`);
     });
 
     $('copySvgBtn').addEventListener('click', async () => {
@@ -2779,6 +2865,7 @@
       $('patchClear').disabled = !act;
       $('patchMeta').textContent = act ? `${+patch.wIn.toFixed(2)}″ × ${+patch.hIn.toFixed(2)}″` : '';
       $('svgPhysRow').hidden = !act;
+      $('pdfOutlineRow').hidden = !act;
       if (act) $('svgPhysSize').textContent = `${+patch.wIn.toFixed(2)}″ × ${+patch.hIn.toFixed(2)}″`;
     }
 
@@ -2803,28 +2890,52 @@
     // Patch outline as a Path2D in a W×H box. Shapes are defined in a unit box in their
     // natural orientation; a swapped orientation transposes the points (a 90° turn for
     // these symmetric shapes).
-    function patchPath(p, w, h) {
-      const path = new Path2D();
-      if (p.shape === 'ellipse') { path.ellipse(w / 2, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2); return path; }
-      if (p.shape === 'rect') {
-        const r = Math.min(w / 2, h / 2, (p.r / 25.4) * (w / p.wIn));
-        path.moveTo(r, 0);
-        path.arcTo(w, 0, w, h, r); path.arcTo(w, h, 0, h, r);
-        path.arcTo(0, h, 0, 0, r); path.arcTo(0, 0, w, 0, r);
-        path.closePath();
-        return path;
+    // Patch outline in a W×H box as M/L/C/Z commands (cubic Béziers only), so the same
+    // shape can be drawn on the canvas and written into a PDF.
+    function patchOutline(p, w, h) {
+      const K = 0.5522847498; // cubic control distance for a quarter circle
+      if (p.shape === 'ellipse') {
+        const rx = w / 2, ry = h / 2, cx = rx, cy = ry, kx = rx * K, ky = ry * K;
+        return [['M', cx + rx, cy],
+          ['C', cx + rx, cy + ky, cx + kx, cy + ry, cx, cy + ry],
+          ['C', cx - kx, cy + ry, cx - rx, cy + ky, cx - rx, cy],
+          ['C', cx - rx, cy - ky, cx - kx, cy - ry, cx, cy - ry],
+          ['C', cx + kx, cy - ry, cx + rx, cy - ky, cx + rx, cy], ['Z']];
       }
-      const cmds = p.shape === 'shield'
+      if (p.shape === 'rect') {
+        const r = Math.min(w / 2, h / 2, (p.r / 25.4) * (w / p.wIn)), k = r * K;
+        return [['M', r, 0], ['L', w - r, 0], ['C', w - r + k, 0, w, r - k, w, r],
+          ['L', w, h - r], ['C', w, h - r + k, w - r + k, h, w - r, h],
+          ['L', r, h], ['C', r - k, h, 0, h - r + k, 0, h - r],
+          ['L', 0, r], ['C', 0, r - k, r - k, 0, r, 0], ['Z']];
+      }
+      const unit = p.shape === 'shield'
         ? [['M', 0, 0], ['L', 1, 0], ['L', 1, 0.5], ['Q', 1, 0.85, 0.5, 1], ['Q', 0, 0.85, 0, 0.5]]
         : [['M', 0, 0.5], ['L', 0.25, 0], ['L', 0.75, 0], ['L', 1, 0.5], ['L', 0.75, 1], ['L', 0.25, 1]];
       const swapped = (p.wIn >= p.hIn ? 'landscape' : 'portrait') !== p.natural;
       const pt = (u, v) => swapped ? [v * w, u * h] : [u * w, v * h];
-      for (const [c, ...a] of cmds) {
-        if (c === 'M') path.moveTo(...pt(a[0], a[1]));
-        else if (c === 'L') path.lineTo(...pt(a[0], a[1]));
-        else path.quadraticCurveTo(...pt(a[0], a[1]), ...pt(a[2], a[3]));
+      const out = [];
+      let cur = [0, 0];
+      for (const [c, ...a] of unit) {
+        if (c === 'Q') { // quadratic → cubic
+          const q = pt(a[0], a[1]), e = pt(a[2], a[3]);
+          out.push(['C', cur[0] + 2 / 3 * (q[0] - cur[0]), cur[1] + 2 / 3 * (q[1] - cur[1]),
+            e[0] + 2 / 3 * (q[0] - e[0]), e[1] + 2 / 3 * (q[1] - e[1]), e[0], e[1]]);
+          cur = e;
+        } else { cur = pt(a[0], a[1]); out.push([c, ...cur]); }
       }
-      path.closePath();
+      out.push(['Z']);
+      return out;
+    }
+
+    function patchPath(p, w, h) {
+      const path = new Path2D();
+      for (const [c, ...a] of patchOutline(p, w, h)) {
+        if (c === 'M') path.moveTo(a[0], a[1]);
+        else if (c === 'L') path.lineTo(a[0], a[1]);
+        else if (c === 'C') path.bezierCurveTo(...a);
+        else path.closePath();
+      }
       return path;
     }
 
