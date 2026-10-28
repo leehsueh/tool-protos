@@ -726,8 +726,7 @@
           canvas; <em>Clear outside shape</em> makes pixels beyond a round/shield/hex outline transparent, and
           the SVG can be exported at the real size in inches.</li>
         <li><strong>Export</strong> — PNG at any integer scale, SVG with one path per color, or a vector PDF.
-          With a patch size set the PDF is at the real patch size, on its own page or centered on Letter/A4
-          with an optional cut line around the patch shape.</li>
+          With a patch size set the PDF is at the real patch size, on its own page or centered on Letter/A4.</li>
         <li><strong>On a phone</strong> — the canvas fills the screen and everything sits in the thumb zone:
           tools along the bottom, a scrollable strip of the image's colors above them (tap = brush color,
           long-press = open it in the palette, the crossed swatch paints transparent), and a tab bar that
@@ -757,8 +756,7 @@
         <code>shape-rendering="crispEdges"</code>, so it stays small and each color is easy to edit.</p>
       <p><strong>PDF export</strong> is written by hand (no library): a single page whose content stream
         fills one path of rectangles per color, transformed so pixels map to points at the patch's physical
-        size, plus an optional stroked outline built from the same Bézier commands that draw the on-canvas
-        patch outline.</p>
+        size.</p>
       <p><strong>Saving</strong> uses the IndexedDB database <code>tool-protos/image-to-pixel-art</code> (prefixed because every repo on the account shares one GitHub Pages origin): each project stores its pixels as a raw
         <code>ArrayBuffer</code>, a thumbnail, the grid/sampling settings and (optionally) the original image
         file as a <code>Blob</code>. The page asks the browser for persistent storage so saved work isn't
@@ -980,7 +978,6 @@
                   <option value="a4">A4, centered</option>
                 </select>
               </label>
-              <label class="chk" id="pdfOutlineRow" hidden><input type="checkbox" id="pdfOutline" checked> Patch cut line</label>
             </div>
             <div class="row" id="svgPhysRow" hidden>
               <label class="chk"><input type="checkbox" id="svgPhys" checked> SVG at real patch size (<span id="svgPhysSize"></span>)</label>
@@ -2339,7 +2336,7 @@
         `viewBox="0 0 ${W} ${H}" shape-rendering="crispEdges">\n${paths.join('\n')}\n</svg>\n`;
     }
 
-    // Minimal single-page vector PDF: one filled path per color, optional patch cut line and caption.
+    // Minimal single-page vector PDF: one filled path per color, plus a caption on paper sizes.
     function buildPDF() {
       const num = v => +v.toFixed(4);
       const phys = patchActive();
@@ -2360,14 +2357,6 @@
         ops.push(`${num(R(v) / 255)} ${num(G(v) / 255)} ${num(B(v) / 255)} rg`);
         for (const r of rects) ops.push(`${r.x} ${r.y} ${num(Math.min(r.w + e, W - r.x))} ${num(Math.min(r.h + e, H - r.y))} re`);
         ops.push('f');
-      }
-      if (phys && $('pdfOutline').checked) {
-        ops.push(`0 0 0 RG ${num(0.5 / k)} w`);
-        for (const [c, ...a] of patchOutline(patch, W, H)) {
-          ops.push(c === 'M' ? `${num(a[0])} ${num(a[1])} m` : c === 'L' ? `${num(a[0])} ${num(a[1])} l`
-            : c === 'C' ? `${a.map(num).join(' ')} c` : 'h');
-        }
-        ops.push('S');
       }
       ops.push('Q');
       const ascii = t => t.replace(/[^\x20-\x7e]/g, '').replace(/[\\()]/g, '\\$&');
@@ -2865,7 +2854,6 @@
       $('patchClear').disabled = !act;
       $('patchMeta').textContent = act ? `${+patch.wIn.toFixed(2)}″ × ${+patch.hIn.toFixed(2)}″` : '';
       $('svgPhysRow').hidden = !act;
-      $('pdfOutlineRow').hidden = !act;
       if (act) $('svgPhysSize').textContent = `${+patch.wIn.toFixed(2)}″ × ${+patch.hIn.toFixed(2)}″`;
     }
 
@@ -2890,8 +2878,7 @@
     // Patch outline as a Path2D in a W×H box. Shapes are defined in a unit box in their
     // natural orientation; a swapped orientation transposes the points (a 90° turn for
     // these symmetric shapes).
-    // Patch outline in a W×H box as M/L/C/Z commands (cubic Béziers only), so the same
-    // shape can be drawn on the canvas and written into a PDF.
+    // Patch outline in a W×H box as M/L/C/Z commands (cubic Béziers only).
     function patchOutline(p, w, h) {
       const K = 0.5522847498; // cubic control distance for a quarter circle
       if (p.shape === 'ellipse') {
